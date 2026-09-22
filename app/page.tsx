@@ -18,6 +18,7 @@ import { normalizeFulfillmentStage, FULFILLMENT_STAGES, type FulfillmentStage } 
 import { GlobalSystemDashboard } from "@/components/global-system-dashboard";
 import { OrdersModule, type OrderSubTab } from "@/components/orders-module";
 import { supabase } from "@/lib/supabase";
+import { can, type PermissionKey, type UserAccess } from "@/lib/access";
 import type { User } from "@supabase/supabase-js";
 
 export type { FulfillmentStage };
@@ -34,11 +35,11 @@ export type Order = {
 type ImportPreview = { fileName: string; rows: number; duplicates: number; invalid: number; products: Product[] };
 
 const navItems = [
-  { id: "dashboard", label: "Visão geral", icon: LayoutDashboard },
-  { id: "order", label: "Pedidos", icon: ShoppingCart },
-  { id: "products", label: "Produtos", icon: Boxes },
-  { id: "balance", label: "Balanço de estoque", icon: ClipboardCheck },
-  { id: "settings", label: "Configurações", icon: Settings },
+  { id: "dashboard", label: "Visão geral", icon: LayoutDashboard, permission: "dashboard.view" as PermissionKey },
+  { id: "order", label: "Pedidos", icon: ShoppingCart, permission: "orders.view" as PermissionKey },
+  { id: "products", label: "Produtos", icon: Boxes, permission: "products.view" as PermissionKey },
+  { id: "balance", label: "Balanço de estoque", icon: ClipboardCheck, permission: "inventory.view" as PermissionKey },
+  { id: "settings", label: "Usuários e acessos", icon: Settings, permission: null },
 ];
 
 const normalize = (value: unknown) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, " ").trim().toUpperCase();
@@ -84,6 +85,7 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [access, setAccess] = useState<UserAccess | null>(null);
   const [cloudStatus, setCloudStatus] = useState("Conectando ao banco...");
   const [syncAttempt, setSyncAttempt] = useState(0);
   const [savingOrder, setSavingOrder] = useState(false);
@@ -121,10 +123,17 @@ export default function Home() {
     async function connectCloud() {
       setOrganizationId(null);
       setCloudStatus("Sincronizando dados...");
-      const { data: memberships, error: membershipError } = await supabase.from("organization_members").select("organization_id").eq("user_id", user!.id);
+      const { data: memberships, error: membershipError } = await supabase.from("organization_members").select("organization_id,role,permissions,active").eq("user_id", user!.id);
       if (membershipError) { console.error("Falha ao carregar organizações", membershipError); setCloudStatus("Falha na sincronização"); return; }
       const preferredId = localStorage.getItem("central-active-organization");
-      let orgId = memberships?.find((item) => item.organization_id === preferredId)?.organization_id || memberships?.[0]?.organization_id as string | undefined;
+      const activeMemberships = (memberships || []).filter((item) => item.active);
+      let selectedMembership = activeMemberships.find((item) => item.organization_id === preferredId) || activeMemberships[0];
+      let orgId = selectedMembership?.organization_id as string | undefined;
+      if (!orgId && memberships?.length) {
+        setAccess({ role: memberships[0].role, permissions: memberships[0].permissions || [], active: false });
+        setCloudStatus("Acesso suspenso pelo administrador");
+        return;
+      }
       if (!orgId) {
         const { data: existingOrganization } = await supabase.from("organizations").select("id").eq("created_by", user!.id).limit(1).maybeSingle();
         let organization = existingOrganization;
@@ -134,8 +143,9 @@ export default function Home() {
           organization = result.data;
         }
         orgId = organization.id;
-        const { error: memberError } = await supabase.from("organization_members").insert({ organization_id: orgId, user_id: user!.id, role: "owner" });
+        const { error: memberError } = await supabase.from("organization_members").insert({ organization_id: orgId, user_id: user!.id, role: "support" });
         if (memberError && memberError.code !== "23505") { setCloudStatus("Falha ao autorizar o administrador"); return; }
+        selectedMembership = { organization_id: orgId, role: "support", permissions: [], active: true };
         const { count } = await supabase.from("inventory_sectors").select("id", { count:"exact", head:true }).eq("organization_id", orgId);
         if (!count) await supabase.from("inventory_sectors").insert([
           { organization_id:orgId, name:"Loja / Salão", location:"Área de vendas", owner_name:"", status:"Não iniciado", notes:"" },
@@ -146,6 +156,18 @@ export default function Home() {
       if (!orgId || cancelled) return;
       localStorage.setItem("central-active-organization", orgId);
       setOrganizationId(orgId);
+      const resolvedAccess: UserAccess = {
+        role: selectedMembership!.role,
+        permissions: selectedMembership!.permissions || [],
+        active: selectedMembership!.active,
+      };
+      const { data: profile } = await supabase.from("user_profiles").select("slug").eq("id", user!.id).single();
+      if (profile?.slug) {
+        resolvedAccess.slug = profile.slug;
+        const expectedPath = `/u/${profile.slug}`;
+        if (window.location.pathname !== expectedPath) window.history.replaceState({}, "", expectedPath);
+      }
+      setAccess(resolvedAccess);
       const cloudProducts: Product[] = []; let from = 0;
       while (true) {
         const { data, error } = await supabase.from("products").select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,image_url").eq("organization_id", orgId).range(from, from + 999);
@@ -222,9 +244,16 @@ export default function Home() {
   const selectedItems = useMemo(() => products.filter((p) => (quantities[p.id] || 0) > 0).map((p) => ({ ...p, quantity: quantities[p.id] })), [products, quantities]);
   const supplierItems = selectedItems.filter((p) => p.supplier === supplier);
   const totalUnits = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
+  const visibleNavItems = useMemo(() => navItems.filter((item) => !item.permission || can(access, item.permission)), [access]);
+
+  useEffect(() => {
+    if (!access) return;
+    if (!visibleNavItems.some((item) => item.id === view)) setView(visibleNavItems[0]?.id || "settings");
+  }, [access, view, visibleNavItems]);
 
   function setQuantity(id: string, value: number) { setQuantities((current) => ({ ...current, [id]: Math.max(0, Number.isFinite(value) ? value : 0) })); }
   async function saveOrder(status: Order["status"]) {
+    if (!can(access, "orders.create")) return void toast.error("Seu perfil não pode criar pedidos.");
     if (!selectedItems.length) return void toast.error("Adicione pelo menos um produto ao pedido.");
     if (savingOrder) return;
     setSavingOrder(true);
@@ -258,6 +287,7 @@ export default function Home() {
     }
   }
   async function exportXlsx() {
+    if (!can(access, "orders.export")) return void toast.error("Seu perfil não pode exportar pedidos.");
     if (!selectedItems.length) return void toast.error("Não há itens para exportar.");
     const XLSX = await import("xlsx");
     const rows = selectedItems.map((i) => ({ Fornecedor: i.supplier, Código: i.code, Produto: i.description, Categoria: i.category, Estoque: i.stock, Quantidade: i.quantity, Unidade: i.unit }));
@@ -265,6 +295,7 @@ export default function Home() {
     const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, "Pedido"); XLSX.writeFile(book, `pedido-${new Date().toISOString().slice(0, 10)}.xlsx`); toast.success("Planilha XLSX baixada.");
   }
   function exportPdf() {
+    if (!can(access, "orders.export")) return void toast.error("Seu perfil não pode exportar pedidos.");
     if (!selectedItems.length) return void toast.error("Não há itens para exportar.");
     const doc = new jsPDF({ orientation: "landscape" }); doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.text("CDM — Pedido de compra", 14, 16); doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(`Casa das Mangueiras · Emitido em ${new Date().toLocaleString("pt-BR")}`, 14, 22);
     let y = 31; doc.setFillColor(20, 46, 74); doc.rect(14, y - 5, 269, 8, "F"); doc.setTextColor(255, 255, 255); doc.text("FORNECEDOR", 16, y); doc.text("CÓDIGO", 52, y); doc.text("PRODUTO", 82, y); doc.text("ESTOQUE", 232, y); doc.text("PEDIDO", 258, y); y += 8; doc.setTextColor(30, 41, 59);
@@ -272,6 +303,8 @@ export default function Home() {
     doc.save(`pedido-${new Date().toISOString().slice(0, 10)}.pdf`); toast.success("PDF baixado.");
   }
   async function saveProduct(product: Product) {
+    const requiredPermission = creatingProduct ? "products.create" : "products.edit";
+    if (!can(access, requiredPermission)) return void toast.error("Seu perfil não pode salvar produtos.");
     if (!product.description.trim() || !product.supplier.trim()) return void toast.error("Descrição e fornecedor são obrigatórios.");
     const payload = { code:product.code||null,description:product.description.trim(),brand:product.brand.trim(),supplier:product.supplier.trim(),category:product.category.trim()||"Diversos",unit:product.unit.trim()||"un",stock:product.stock,cost:product.cost??null,price:product.price??null,ncm:product.ncm||null,image_url:product.image };
     try {
@@ -293,6 +326,7 @@ export default function Home() {
     } catch { toast.error("Não foi possível salvar o produto. Verifique se o código já existe."); }
   }
   async function inspectImport(file?: File) {
+    if (!can(access, "products.import")) return void toast.error("Seu perfil não pode importar produtos.");
     if (!file) return;
     setImporting(true); setImportPreview(null);
     try {
@@ -317,6 +351,7 @@ export default function Home() {
     finally { setImporting(false); }
   }
   async function confirmImport() {
+    if (!can(access, "products.import")) return void toast.error("Seu perfil não pode importar produtos.");
     if (!importPreview?.products.length) return;
     setImporting(true);
     try {
@@ -336,12 +371,14 @@ export default function Home() {
   }
 
   function createProduct() {
+    if (!can(access, "products.create")) return void toast.error("Seu perfil não pode cadastrar produtos.");
     setCreatingProduct(true);
     setProductModalTab("dados");
     setProductModal({ id:`new-${Date.now()}`,supplier:supplier || "",brand:"",code:"",description:"",category:"Diversos",unit:"un",stock:0,suggested:0,image:null,sourceRow:0,cost:null,price:null,ncm:"",barcode:"" });
   }
 
   function repeatOrder(order: Order) {
+    if (!can(access, "orders.create")) return void toast.error("Seu perfil não pode criar pedidos.");
     setQuantities(Object.fromEntries(order.items.map((item) => [item.id, item.quantity])));
     if (order.items[0]?.supplier) setSupplier(order.items[0].supplier);
     setView("order");
@@ -350,6 +387,7 @@ export default function Home() {
   }
 
   async function removeOrder(order: Order) {
+    if (!can(access, "orders.manage")) return void toast.error("Seu perfil não pode excluir pedidos.");
     if (!confirm(`Excluir o pedido ${order.id}?`)) return;
     if (order.dbId && organizationId) {
       const { error } = await supabase.from("purchase_orders").delete().eq("id", order.dbId).eq("organization_id", organizationId);
@@ -361,6 +399,7 @@ export default function Home() {
   }
 
   async function updateOrderStage(orderId: string, stage: FulfillmentStage) {
+    if (!can(access, "orders.manage")) return void toast.error("Seu perfil não pode alterar etapas.");
     const updated = orders.map((o) => (o.id === orderId ? { ...o, fulfillmentStage: stage } : o));
     setOrders(updated);
     localStorage.setItem("pedido-central-orders", JSON.stringify(updated));
@@ -382,12 +421,12 @@ export default function Home() {
     <Toaster richColors position="top-right" />
     <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
       <div className="brand"><div className="brand-mark"><Image src="/brand/casa-das-mangueiras-logo.webp" width={40} height={40} priority alt="Casa das Mangueiras" /></div><div><strong>CDM</strong><span>Casa das Mangueiras</span></div><button className="mobile-close" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X /></button></div>
-      <nav><p className="nav-label">OPERAÇÃO</p>{navItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => { setView(item.id); setSidebarOpen(false); }}><Icon size={19} /><span>{item.label}</span>{item.id === "order" && selectedItems.length > 0 && <b>{selectedItems.length}</b>}</button>; })}</nav>
-      <div className="sidebar-foot"><div className="user-card"><div className="avatar">{(user.email?.[0] || "C").toUpperCase()}</div><div><strong>{user.email?.split("@")[0] || "Equipe de compras"}</strong><span>{cloudStatus}</span></div></div></div>
+      <nav><p className="nav-label">OPERAÇÃO</p>{visibleNavItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => { setView(item.id); setSidebarOpen(false); }}><Icon size={19} /><span>{item.label}</span>{item.id === "order" && selectedItems.length > 0 && <b>{selectedItems.length}</b>}</button>; })}</nav>
+      <div className="sidebar-foot"><div className="user-card"><div className="avatar">{(user.email?.[0] || "C").toUpperCase()}</div><div><strong>{user.email?.split("@")[0] || "Equipe CDM"}</strong><span>{access?.role === "support" ? "Suporte · acesso total" : cloudStatus}</span></div></div></div>
     </aside>
     {sidebarOpen && <button className="backdrop" aria-label="Fechar menu" onClick={() => setSidebarOpen(false)} />}
     <main className="main-area"><header className="topbar"><button className="menu-button" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu"><Menu /></button><div className="topbar-search"><Search size={18} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar produto, código ou medida..." /></div><div className="topbar-actions"><span className={`sync-dot ${cloudStatus.startsWith("Falha") ? "sync-error" : cloudStatus === "Dados sincronizados" ? "sync-ok" : "sync-loading"}`} /> {cloudStatus}<button className="logout-button" onClick={() => supabase.auth.signOut()}>Sair</button></div></header>
-      {view === "dashboard" && (
+      {view === "dashboard" && can(access, "dashboard.view") && (
         <GlobalSystemDashboard
           products={products}
           orders={orders}
@@ -406,9 +445,12 @@ export default function Home() {
           onImport={() => setImportOpen(true)}
         />
       )}
-      {view === "order" && (
+      {view === "order" && can(access, "orders.view") && (
         <OrdersModule
-          orderTab={orderTab}
+          canCreate={can(access, "orders.create")}
+          canExport={can(access, "orders.export")}
+          canManage={can(access, "orders.manage")}
+          orderTab={!can(access, "orders.create") && orderTab === "compose" ? "history" : orderTab}
           setOrderTab={setOrderTab}
           products={products}
           orders={orders}
@@ -437,8 +479,8 @@ export default function Home() {
           updateOrderStage={updateOrderStage}
         />
       )}
-      {view === "products" && <Products products={products} onEdit={(product, tab = "dados") => { setCreatingProduct(false); setProductModal(product); setProductModalTab(tab); }} onCreate={createProduct} onImport={() => setImportOpen(true)} />}
-      {view === "balance" && <BalanceModule products={products} organizationId={organizationId} userId={user.id} />}
+      {view === "products" && can(access, "products.view") && <Products products={products} canCreate={can(access, "products.create")} canEdit={can(access, "products.edit")} canImport={can(access, "products.import")} onEdit={(product, tab = "dados") => { setCreatingProduct(false); setProductModal(product); setProductModalTab(tab); }} onCreate={createProduct} onImport={() => setImportOpen(true)} />}
+      {view === "balance" && can(access, "inventory.view") && <BalanceModule products={products} organizationId={organizationId} userId={user.id} canCount={can(access, "inventory.count")} canManage={can(access, "inventory.manage")} />}
       {view === "settings" && (organizationId ? <SettingsModule user={user} organizationId={organizationId} onOrganizationChange={() => window.location.reload()} /> : <section className="content settings-unavailable"><div className="panel"><Settings size={30}/><div><span className="eyebrow">CONFIGURAÇÕES</span><h1>{cloudStatus.startsWith("Falha") ? "Não foi possível carregar agora" : "Preparando sua organização"}</h1><p>{cloudStatus.startsWith("Falha") ? "A conexão foi interrompida. Tente novamente; seus dados locais continuam preservados." : "Estamos conectando sua conta e preparando os dados da empresa."}</p></div><Button onClick={() => setSyncAttempt((attempt) => attempt + 1)} disabled={!cloudStatus.startsWith("Falha")}><RotateCcw size={16}/> Tentar novamente</Button></div></section>)}
     </main>
     <Dialog open={!!productModal} onOpenChange={(open) => { if (!open) { setProductModal(null); setCreatingProduct(false); } }}><DialogContent className="sm:max-w-[680px] max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>{creatingProduct ? "Cadastrar produto" : "Detalhes do produto"}</DialogTitle></DialogHeader>{productModal && <ProductEditor key={`${productModal.id}-${productModalTab}`} product={productModal} initialTab={productModalTab} onSave={saveProduct} />}</DialogContent></Dialog>
@@ -446,11 +488,11 @@ export default function Home() {
   </div>;
 }
 
-function Products({ products, onEdit, onCreate, onImport }: { products: Product[]; onEdit: (product: Product, tab?: "dados" | "codigo") => void; onCreate: () => void; onImport: () => void }) {
+function Products({ products, canCreate, canEdit, canImport, onEdit, onCreate, onImport }: { products: Product[]; canCreate: boolean; canEdit: boolean; canImport: boolean; onEdit: (product: Product, tab?: "dados" | "codigo") => void; onCreate: () => void; onImport: () => void }) {
   const [term, setTerm] = useState(""); const [supplierFilter, setSupplierFilter] = useState("Todos"); const [limit, setLimit] = useState(120);
   const suppliers = useMemo(() => Array.from(new Set(products.map((p) => p.supplier))).sort((a,b) => a.localeCompare(b, "pt-BR")), [products]);
   const filtered = useMemo(() => products.filter((p) => (supplierFilter === "Todos" || p.supplier === supplierFilter) && `${p.description} ${p.code} ${p.supplier} ${p.brand}`.toLowerCase().includes(term.toLowerCase())), [products, supplierFilter, term]);
-  return <section className="content"><div className="page-heading"><div><span className="eyebrow">CATÁLOGO MESTRE</span><h1>Produtos</h1><p>Base unificada, sem duplicidades e pronta para receber novas planilhas.</p></div><div className="heading-actions"><Button variant="outline" onClick={onCreate}><Plus size={17}/> Novo produto</Button><Button onClick={onImport}><Upload size={17} /> Importar planilha</Button></div></div><div className="products-toolbar"><div className="inline-search"><Search size={17} /><Input value={term} onChange={(e) => { setTerm(e.target.value); setLimit(120); }} placeholder="Pesquisar produto, código, marca ou fornecedor..." /></div><div className="select-wrap"><select value={supplierFilter} onChange={(e) => { setSupplierFilter(e.target.value); setLimit(120); }}><option>Todos</option>{suppliers.map((name) => <option key={name}>{name}</option>)}</select><ChevronDown size={14} /></div><Badge variant="secondary">{filtered.length.toLocaleString("pt-BR")} produtos</Badge></div><div className="product-grid">{filtered.slice(0, limit).map((product) => <div key={product.id} className="product-card flex items-start justify-between gap-2 p-3"><div className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer" onClick={() => onEdit(product, "dados")}><div className="card-image">{product.image ? <img src={product.image} alt="" /> : <PackagePlus />}</div><div className="flex-1 min-w-0"><span>{product.supplier} · {product.code || product.category}</span><strong>{product.description}</strong><small>{product.brand !== product.supplier ? `${product.brand} · ` : ""}Estoque: {product.stock} {product.unit}</small></div></div><button type="button" className="p-2 text-[#9c8e90] hover:text-[#790a0e] hover:bg-[#f6e8ea] rounded-lg transition shrink-0" title="Ver código de barras / QR Code deste produto" onClick={(e) => { e.stopPropagation(); onEdit(product, "codigo"); }}><Barcode size={18} /></button></div>)}</div>{filtered.length > limit && <div className="load-more"><Button variant="outline" onClick={() => setLimit((value) => value + 120)}>Mostrar mais produtos ({(filtered.length - limit).toLocaleString("pt-BR")})</Button></div>}</section>;
+  return <section className="content"><div className="page-heading"><div><span className="eyebrow">CATÁLOGO MESTRE</span><h1>Produtos</h1><p>Base unificada, sem duplicidades e pronta para receber novas planilhas.</p></div><div className="heading-actions">{canCreate && <Button variant="outline" onClick={onCreate}><Plus size={17}/> Novo produto</Button>}{canImport && <Button onClick={onImport}><Upload size={17} /> Importar planilha</Button>}</div></div><div className="products-toolbar"><div className="inline-search"><Search size={17} /><Input value={term} onChange={(e) => { setTerm(e.target.value); setLimit(120); }} placeholder="Pesquisar produto, código, marca ou fornecedor..." /></div><div className="select-wrap"><select value={supplierFilter} onChange={(e) => { setSupplierFilter(e.target.value); setLimit(120); }}><option>Todos</option>{suppliers.map((name) => <option key={name}>{name}</option>)}</select><ChevronDown size={14} /></div><Badge variant="secondary">{filtered.length.toLocaleString("pt-BR")} produtos</Badge></div><div className="product-grid">{filtered.slice(0, limit).map((product) => <div key={product.id} className="product-card flex items-start justify-between gap-2 p-3"><div className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer" onClick={() => canEdit ? onEdit(product, "dados") : undefined}><div className="card-image">{product.image ? <img src={product.image} alt="" /> : <PackagePlus />}</div><div className="flex-1 min-w-0"><span>{product.supplier} · {product.code || product.category}</span><strong>{product.description}</strong><small>{product.brand !== product.supplier ? `${product.brand} · ` : ""}Estoque: {product.stock} {product.unit}</small></div></div><button type="button" className="p-2 text-[#9c8e90] hover:text-[#790a0e] hover:bg-[#f6e8ea] rounded-lg transition shrink-0" title="Ver código de barras / QR Code deste produto" onClick={(e) => { e.stopPropagation(); onEdit(product, "codigo"); }}><Barcode size={18} /></button></div>)}</div>{filtered.length > limit && <div className="load-more"><Button variant="outline" onClick={() => setLimit((value) => value + 120)}>Mostrar mais produtos ({(filtered.length - limit).toLocaleString("pt-BR")})</Button></div>}</section>;
 }
 
 function ProductEditor({ product, initialTab = "dados", onSave }: { product: Product; initialTab?: "dados" | "codigo"; onSave: (product: Product) => void }) {

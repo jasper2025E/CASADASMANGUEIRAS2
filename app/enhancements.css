@@ -107,3 +107,30 @@
   .auth-brand strong { font-size:22px; }
   .auth-options { align-items:flex-start; flex-direction:column; gap:0; }
 }
++
+/* Granular user access */
+.profile-url{display:grid;gap:7px;padding:12px;border:1px solid #e4d9da;border-radius:12px;background:#faf7f7}
+.profile-url span{font-size:11px;font-weight:800;color:#786b6d;text-transform:uppercase;letter-spacing:.06em}
+.profile-url code{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#790a0e;font-size:12px}
+.member-identity{min-width:0;flex:1}
+.member-identity strong,.member-identity span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.member-disabled{opacity:.62;background:#f6f3f3}
+.access-editor{margin-top:18px}
+.access-editor-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:20px}
+.access-editor-head h2{margin:4px 0;font-size:22px}
+.access-editor-head p{margin:0;color:#786b6d}
+.access-profile-row{display:grid;grid-template-columns:minmax(240px,1fr) minmax(300px,1.4fr);gap:16px;margin-bottom:20px}
+.access-profile-row>label:first-child{display:grid;gap:7px;font-size:12px;font-weight:800;color:#514548}
+.access-active{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid #e4d9da;border-radius:12px;background:#faf7f7}
+.access-active input,.permission-groups input{accent-color:#790a0e;width:17px;height:17px}
+.access-active span,.access-active strong,.access-active small{display:block}
+.access-active small{margin-top:3px;color:#786b6d;font-weight:500}
+.permission-groups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.permission-groups fieldset{min-width:0;border:1px solid #e4d9da;border-radius:14px;padding:13px;background:#fff}
+.permission-groups legend{padding:0 7px;color:#790a0e;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.05em}
+.permission-groups label{display:flex;align-items:flex-start;gap:9px;padding:8px 4px;font-size:12px;color:#3f3436}
+.access-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid #eee5e6}
+.settings-card select,.access-profile-row select{width:100%;min-height:40px;border:1px solid #ded3d5;border-radius:9px;background:#fff;padding:0 34px 0 11px;color:#211718}
+@media(max-width:900px){.permission-groups{grid-template-columns:1fr 1fr}.access-profile-row{grid-template-columns:1fr}}
+@media(max-width:620px){.permission-groups{grid-template-columns:1fr}.access-editor-head{flex-direction:column}.team-row{align-items:flex-start;flex-wrap:wrap}.member-identity{flex-basis:calc(100% - 54px)}}
+

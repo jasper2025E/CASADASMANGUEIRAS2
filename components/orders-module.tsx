@@ -40,6 +40,9 @@ import {
 export type OrderSubTab = "compose" | "history" | "analytics";
 
 interface OrdersModuleProps {
+  canCreate: boolean;
+  canExport: boolean;
+  canManage: boolean;
   orderTab: OrderSubTab;
   setOrderTab: (tab: OrderSubTab) => void;
   products: Product[];
@@ -78,6 +81,9 @@ const supplierColors: Record<string, string> = {
 };
 
 export function OrdersModule({
+  canCreate,
+  canExport,
+  canManage,
   orderTab,
   setOrderTab,
   products,
@@ -116,7 +122,7 @@ export function OrdersModule({
     <section className="content order-content">
       {/* 3-Layer Integrated Submodule Tabs */}
       <div className="order-subtabs flex items-center gap-2 p-1.5 bg-[#ede6e7] rounded-xl w-max max-w-full overflow-x-auto mb-5 shadow-2xs">
-        <button
+        {canCreate && <button
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
             orderTab === "compose"
               ? "bg-white text-[#790a0e] shadow-xs"
@@ -131,7 +137,7 @@ export function OrdersModule({
               {selectedItems.length}
             </span>
           )}
-        </button>
+        </button>}
 
         <button
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
@@ -172,7 +178,7 @@ export function OrdersModule({
               <h1>Montar novo pedido</h1>
               <p>Selecione o fornecedor, confira o estoque e informe o que precisa comprar.</p>
             </div>
-            <div className="heading-actions">
+            {canCreate && <div className="heading-actions">
               <Button
                 variant="outline"
                 disabled={savingOrder}
@@ -186,7 +192,7 @@ export function OrdersModule({
               >
                 <Check size={17} /> {savingOrder ? "Salvando..." : "Finalizar pedido"}
               </Button>
-            </div>
+            </div>}
           </div>
 
           <div className="supplier-selector">
@@ -388,7 +394,7 @@ export function OrdersModule({
                 </strong>
               </div>
 
-              <div className="export-label">EXPORTAR OU COMPARTILHAR</div>
+              {canExport && <><div className="export-label">EXPORTAR OU COMPARTILHAR</div>
               <div className="export-grid">
                 <button onClick={exportPdf}>
                   <FileDown size={18} />
@@ -402,16 +408,16 @@ export function OrdersModule({
                   <Printer size={18} />
                   <span>Imprimir</span>
                 </button>
-              </div>
+              </div></>}
 
-              <Button
+              {canCreate && <Button
                 className="w-full"
                 disabled={savingOrder}
                 onClick={() => saveOrder("Finalizado")}
               >
                 <Check size={17} />{" "}
                 {savingOrder ? "Salvando..." : "Finalizar e salvar"}
-              </Button>
+              </Button>}
             </aside>
           </div>
         </>
@@ -465,18 +471,18 @@ export function OrdersModule({
                         onSelectStage={(newStage) =>
                           updateOrderStage(order.id, newStage)
                         }
-                        interactive={true}
+                        interactive={canManage}
                       />
                     </div>
 
                     <div className="row-actions">
-                      <button
+                      {canCreate && <button
                         onClick={() => setSelectedOrderForModal(order)}
                         title="Ver detalhes e etapas"
                       >
                         <Eye size={16} />
-                      </button>
-                      <button
+                      </button>}
+                      {canManage && <button
                         onClick={() => {
                           repeatOrder(order);
                           setOrderTab("compose");
@@ -484,7 +490,7 @@ export function OrdersModule({
                         title="Repetir pedido no carrinho"
                       >
                         <RotateCcw size={16} />
-                      </button>
+                      </button>}
                       <button
                         className="danger"
                         onClick={() => void removeOrder(order)}
@@ -503,13 +509,13 @@ export function OrdersModule({
                 <span>
                   Salve um rascunho ou finalize um pedido na aba &quot;Montar Pedido&quot;.
                 </span>
-                <Button
+                {canCreate && <Button
                   variant="outline"
                   onClick={() => setOrderTab("compose")}
                   className="mt-3"
                 >
                   Ir para Montar Pedido
-                </Button>
+                </Button>}
               </div>
             )}
           </div>
@@ -714,7 +720,7 @@ export function OrdersModule({
               </div>
 
               <div className="flex items-center justify-between pt-3 border-t border-[#ede5e6]">
-                <Button
+                {canCreate && <Button
                   variant="outline"
                   size="sm"
                   onClick={() => {
@@ -725,7 +731,7 @@ export function OrdersModule({
                   className="flex items-center gap-1.5"
                 >
                   <RotateCcw size={15} /> Repetir este pedido
-                </Button>
+                </Button>}
                 <span className="text-xs font-bold text-[#790a0e]">
                   Total:{" "}
                   {activeModalOrder.items
