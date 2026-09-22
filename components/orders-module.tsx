@@ -165,7 +165,7 @@ export function OrdersModule({
           onClick={() => setOrderTab("analytics")}
         >
           <BarChart3 size={15} />
-          <span>3. Painel de Compras</span>
+          <span>3. Painel de Pedidos</span>
         </button>
       </div>
 
@@ -174,9 +174,9 @@ export function OrdersModule({
         <>
           <div className="page-heading">
             <div>
-              <span className="eyebrow">COMPRAS</span>
+              <span className="eyebrow">REPOSIÇÃO INTERNA</span>
               <h1>Montar novo pedido</h1>
-              <p>Selecione o fornecedor, confira o estoque e informe o que precisa comprar.</p>
+              <p>Selecione os produtos que sua filial precisa receber do Centro de Distribuição.</p>
             </div>
             {canCreate && <div className="heading-actions">
               <Button
@@ -190,15 +190,15 @@ export function OrdersModule({
                 disabled={savingOrder}
                 onClick={() => saveOrder("Finalizado")}
               >
-                <Check size={17} /> {savingOrder ? "Salvando..." : "Finalizar pedido"}
+                <Check size={17} /> {savingOrder ? "Enviando..." : "Enviar ao CD"}
               </Button>
             </div>}
           </div>
 
           <div className="supplier-selector">
             <div>
-              <span>Fornecedor do pedido</span>
-              <strong>{suppliers.length.toLocaleString("pt-BR")} fornecedores cadastrados</strong>
+              <span>Filtro informativo</span>
+              <strong>O destino do pedido é sempre o Centro de Distribuição</strong>
             </div>
             <div className="select-wrap supplier-select">
               <Boxes size={17} />
@@ -209,14 +209,14 @@ export function OrdersModule({
                   setCategory("Todas");
                 }}
               >
-                {suppliers.map((name) => (
+                <option>Todos</option>{suppliers.map((name) => (
                   <option key={name}>{name}</option>
                 ))}
               </select>
               <ChevronDown size={15} />
             </div>
             <Badge variant="secondary">
-              {products.filter((p) => p.supplier === supplier).length.toLocaleString("pt-BR")} produtos
+              {products.filter((p) => supplier === "Todos" || p.supplier === supplier).length.toLocaleString("pt-BR")} produtos
             </Badge>
           </div>
 
@@ -224,7 +224,7 @@ export function OrdersModule({
             <div className="catalog-card">
               <div className="catalog-toolbar">
                 <div>
-                  <h2>Produtos de {supplier}</h2>
+                  <h2>{supplier === "Todos" ? "Todos os produtos" : `Produtos de ${supplier}`}</h2>
                   <span>{filtered.length} produtos encontrados</span>
                 </div>
                 <div className="filters">
@@ -295,10 +295,10 @@ export function OrdersModule({
                                 setProductModalTab("codigo");
                               }}
                               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#f6e8ea] text-[#790a0e] hover:bg-[#eed5d8] border border-[#eed5d8] transition cursor-pointer"
-                              title="Código de barras / QR Code (Leitor de inventário)"
+                              title="Código de barras EAN-13"
                             >
                               <Barcode size={12} />
-                              <span>Barras/QR</span>
+                              <span>EAN‑13</span>
                             </button>
                           </div>
                           <strong>{product.description}</strong>
@@ -416,7 +416,7 @@ export function OrdersModule({
                 onClick={() => saveOrder("Finalizado")}
               >
                 <Check size={17} />{" "}
-                {savingOrder ? "Salvando..." : "Finalizar e salvar"}
+                {savingOrder ? "Enviando..." : "Enviar pedido ao CD"}
               </Button>}
             </aside>
           </div>
@@ -431,7 +431,7 @@ export function OrdersModule({
               <span className="eyebrow">REGISTROS & RASTREAMENTO</span>
               <h1>Histórico de pedidos</h1>
               <p>
-                Acompanhe o fluxo de atendimento em 4 etapas (Pendente &rarr; Em separação &rarr; Enviado &rarr; Entregue).
+                Acompanhe recebimento, aprovação, separação, despacho e entrega pelo Centro de Distribuição.
               </p>
             </div>
             <div className="heading-actions">
@@ -444,7 +444,7 @@ export function OrdersModule({
           <div className="panel table-panel">
             <div className="history-head">
               <span>Pedido</span>
-              <span>Fornecedor</span>
+              <span>Origem / destino</span>
               <span>Data</span>
               <span>Itens</span>
               <span>Atendimento (Etapa)</span>
@@ -460,7 +460,7 @@ export function OrdersModule({
                 return (
                   <div className="history-row" key={order.dbId || order.id}>
                     <strong>{order.id}</strong>
-                    <span>{order.supplier}</span>
+                    <span>{order.originOrganizationName || "Filial"} → {order.destinationOrganizationName || "Centro de Distribuição"}</span>
                     <span>{new Date(order.createdAt).toLocaleString("pt-BR")}</span>
                     <span>{order.items.length} itens</span>
 
@@ -476,12 +476,12 @@ export function OrdersModule({
                     </div>
 
                     <div className="row-actions">
-                      {canCreate && <button
+                      <button
                         onClick={() => setSelectedOrderForModal(order)}
                         title="Ver detalhes e etapas"
                       >
                         <Eye size={16} />
-                      </button>}
+                      </button>
                       {canManage && <button
                         onClick={() => {
                           repeatOrder(order);
@@ -522,14 +522,14 @@ export function OrdersModule({
         </>
       )}
 
-      {/* LAYER 3: PAINEL DE COMPRAS & FORNECEDORES */}
+      {/* LAYER 3: PAINEL OPERACIONAL DE PEDIDOS */}
       {orderTab === "analytics" && (
         <>
           <div className="page-heading">
             <div>
-              <span className="eyebrow">ANÁLISE DE COMPRAS</span>
-              <h1>Painel de compras e fornecedores</h1>
-              <p>Métricas operacionais de aquisição, distribuição de catálogos e últimos pedidos.</p>
+              <span className="eyebrow">ANÁLISE DE REPOSIÇÃO</span>
+              <h1>Painel operacional de pedidos</h1>
+              <p>Métricas do fluxo entre filiais e Centro de Distribuição.</p>
             </div>
             <div className="heading-actions">
               <Button onClick={() => setOrderTab("compose")}>
@@ -542,14 +542,14 @@ export function OrdersModule({
             <div>
               <span>Pedidos cadastrados</span>
               <strong>{orders.length}</strong>
-              <small>Histórico completo de compras</small>
+              <small>Solicitações internas registradas</small>
             </div>
             <div>
-              <span>Pedidos finalizados</span>
+              <span>Pedidos concluídos</span>
               <strong className="text-emerald-700">
-                {orders.filter((o) => o.status === "Finalizado").length}
+                {orders.filter((o) => normalizeFulfillmentStage(o.fulfillmentStage,o.status) === "delivered").length}
               </strong>
-              <small>Concluídos e emitidos</small>
+              <small>Recebidos pelas filiais</small>
             </div>
             <div>
               <span>Rascunhos em aberto</span>
@@ -559,7 +559,7 @@ export function OrdersModule({
               <small>Em edição no sistema</small>
             </div>
             <div>
-              <span>Fornecedores parceiros</span>
+              <span>Fornecedores informativos</span>
               <strong>{suppliers.length}</strong>
               <small>Catálogos ativos no sistema</small>
             </div>
@@ -568,8 +568,8 @@ export function OrdersModule({
           <div className="dashboard-grid">
             <div className="panel">
               <div className="panel-heading">
-                <h2>Catálogos por fornecedor</h2>
-                <span>Base atual de compras</span>
+                <h2>Produtos por fornecedor</h2>
+                <span>Informação auxiliar do catálogo</span>
               </div>
               {suppliers.map((name) => {
                 const count = products.filter((p) => p.supplier === name).length;
@@ -590,7 +590,7 @@ export function OrdersModule({
                         }}
                         className="text-xs text-[#790a0e] hover:underline font-semibold"
                       >
-                        Comprar &rarr;
+                        Filtrar &rarr;
                       </button>
                     </div>
                   </div>
@@ -629,7 +629,7 @@ export function OrdersModule({
                       <div>
                         <strong>{order.id}</strong>
                         <span>
-                          {order.supplier} ·{" "}
+                          {order.originOrganizationName || "Filial"} → Centro de Distribuição ·{" "}
                           {new Date(order.createdAt).toLocaleDateString("pt-BR")}
                         </span>
                       </div>
@@ -672,7 +672,7 @@ export function OrdersModule({
               <div className="order-detail-meta flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <strong className="text-sm text-[#211718]">
-                    {activeModalOrder.supplier}
+                    {activeModalOrder.originOrganizationName || "Filial solicitante"} → {activeModalOrder.destinationOrganizationName || "Centro de Distribuição"}
                   </strong>
                   <span className="text-xs text-[#7a6c6e]">
                     {new Date(activeModalOrder.createdAt).toLocaleString("pt-BR")}
@@ -696,7 +696,9 @@ export function OrdersModule({
                 onSelectStage={(newStage) =>
                   updateOrderStage(activeModalOrder.id, newStage)
                 }
+                reviewMessage={activeModalOrder.reviewMessage}
               />
+              {canManage && normalizeFulfillmentStage(activeModalOrder.fulfillmentStage,activeModalOrder.status) === "received" && <Button variant="outline" className="border-red-200 text-red-700" onClick={()=>updateOrderStage(activeModalOrder.id,"rejected")}>Rejeitar e informar motivo</Button>}
 
               <div className="order-detail-list">
                 {activeModalOrder.items.map((item) => (

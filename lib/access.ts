@@ -51,7 +51,7 @@ export const rolePresets: Record<MemberRole, PermissionKey[]> = {
   viewer: ["dashboard.view","orders.view","products.view","inventory.view"],
 };
 
-export type UserAccess = { role: MemberRole; permissions: string[]; active: boolean; slug?: string };
+export type UserAccess = { role: MemberRole; permissions: string[]; active: boolean };
 
 export function can(access: UserAccess | null, permission: PermissionKey) {
   return !!access?.active && (access.role === "support" || access.permissions.includes(permission));

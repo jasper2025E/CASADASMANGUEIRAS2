@@ -108,9 +108,6 @@
   .auth-options { align-items:flex-start; flex-direction:column; gap:0; }
 }
 /* Granular user access */
-.profile-url{display:grid;gap:7px;padding:12px;border:1px solid #e4d9da;border-radius:12px;background:#faf7f7}
-.profile-url span{font-size:11px;font-weight:800;color:#786b6d;text-transform:uppercase;letter-spacing:.06em}
-.profile-url code{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#790a0e;font-size:12px}
 .member-identity{min-width:0;flex:1}
 .member-identity strong,.member-identity span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .member-disabled{opacity:.62;background:#f6f3f3}

@@ -30,6 +30,11 @@ export type Order = {
   createdAt: string;
   status: "Rascunho" | "Finalizado";
   fulfillmentStage?: FulfillmentStage | "Pending" | "Processing" | "Shipped" | "Delivered";
+  originOrganizationId?: string;
+  destinationOrganizationId?: string;
+  originOrganizationName?: string;
+  destinationOrganizationName?: string;
+  reviewMessage?: string;
   items: Array<Product & { quantity: number }>;
 };
 type ImportPreview = { fileName: string; rows: number; duplicates: number; invalid: number; products: Product[] };
@@ -44,7 +49,7 @@ const navItems = [
 
 const normalize = (value: unknown) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, " ").trim().toUpperCase();
 const productKey = (product: Pick<Product, "code" | "description" | "supplier">) => product.code ? `COD:${normalize(product.code)}` : `DESC:${normalize(product.description)}|${normalize(product.supplier)}`;
-const fromCloudProduct = (product: Record<string, unknown>): Product => ({ id:String(product.id),code:String(product.code||""),description:String(product.description||""),brand:String(product.brand||""),supplier:String(product.supplier||""),category:String(product.category||"Diversos"),unit:String(product.unit||"un"),stock:Number(product.stock)||0,suggested:0,image:product.image_url ? String(product.image_url) : null,sourceRow:0,cost:product.cost===null?null:Number(product.cost),price:product.price===null?null:Number(product.price),ncm:String(product.ncm||"") });
+const fromCloudProduct = (product: Record<string, unknown>): Product => ({ id:String(product.id),code:String(product.code||""),description:String(product.description||""),brand:String(product.brand||""),supplier:String(product.supplier||""),category:String(product.category||"Diversos"),unit:String(product.unit||"un"),stock:Number(product.stock)||0,suggested:0,image:product.image_url ? String(product.image_url) : null,sourceRow:0,cost:product.cost===null?null:Number(product.cost),price:product.price===null?null:Number(product.price),ncm:String(product.ncm||""),barcode:String(product.barcode||"") });
 
 function openCatalogDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -67,7 +72,7 @@ export default function Home() {
   const [orderTab, setOrderTab] = useState<OrderSubTab>("compose");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [products, setProducts] = useState<Product[]>(productsSeed as Product[]);
-  const [supplier, setSupplier] = useState("Force Line");
+  const [supplier, setSupplier] = useState("Todos");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Todas");
   const [quantities, setQuantities] = useState<Record<string, number>>({});
@@ -85,6 +90,9 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [organizationName, setOrganizationName] = useState("Organização");
+  const [organizationType, setOrganizationType] = useState<"branch" | "distribution_center">("branch");
+  const [destinationOrganizationId, setDestinationOrganizationId] = useState<string | null>(null);
   const [access, setAccess] = useState<UserAccess | null>(null);
   const [cloudStatus, setCloudStatus] = useState("Conectando ao banco...");
   const [syncAttempt, setSyncAttempt] = useState(0);
@@ -161,16 +169,15 @@ export default function Home() {
         permissions: selectedMembership!.permissions || [],
         active: selectedMembership!.active,
       };
-      const { data: profile } = await supabase.from("user_profiles").select("slug").eq("id", user!.id).single();
-      if (profile?.slug) {
-        resolvedAccess.slug = profile.slug;
-        const expectedPath = `/u/${profile.slug}`;
-        if (window.location.pathname !== expectedPath) window.history.replaceState({}, "", expectedPath);
-      }
       setAccess(resolvedAccess);
+      const { data: organization } = await supabase.from("organizations").select("name,organization_type,parent_organization_id").eq("id", orgId).single();
+      const currentType = organization?.organization_type === "distribution_center" ? "distribution_center" : "branch";
+      setOrganizationName(organization?.name || "Organização");
+      setOrganizationType(currentType);
+      setDestinationOrganizationId(organization?.parent_organization_id || orgId);
       const cloudProducts: Product[] = []; let from = 0;
       while (true) {
-        const { data, error } = await supabase.from("products").select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,image_url").eq("organization_id", orgId).range(from, from + 999);
+        const { data, error } = await supabase.from("products").select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url").eq("organization_id", orgId).range(from, from + 999);
         if (error) { setCloudStatus("Falha ao carregar produtos"); return; }
         cloudProducts.push(...(data || []).map((product) => fromCloudProduct(product)));
         if (!data || data.length < 1000) break; from += 1000;
@@ -179,12 +186,12 @@ export default function Home() {
         setCloudStatus("Enviando catálogo inicial...");
         for (let index = 0; index < productsSeed.length; index += 400) {
           const batch = (productsSeed as Product[]).slice(index,index+400).map((p)=>({organization_id:orgId,code:p.code||null,description:p.description,brand:p.brand||"",supplier:p.supplier,category:p.category,unit:p.unit,stock:p.stock,cost:p.cost??null,price:p.price??null,ncm:p.ncm||null,image_url:p.image||null,created_by:user!.id}));
-          const { data, error } = await supabase.from("products").upsert(batch,{onConflict:"organization_id,product_key",ignoreDuplicates:true}).select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,image_url");
+          const { data, error } = await supabase.from("products").upsert(batch,{onConflict:"organization_id,product_key",ignoreDuplicates:true}).select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url");
           if (error) { setCloudStatus("Falha ao enviar o catálogo"); return; }
           cloudProducts.push(...(data || []).map((product) => fromCloudProduct(product)));
         }
       }
-      const { data: orderRows, error: ordersError } = await supabase.from("purchase_orders").select("id,order_number,supplier,status,created_at,purchase_order_items(quantity,unit,products(id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,image_url))").eq("organization_id", orgId).order("created_at", { ascending:false }).limit(250);
+      const { data: orderRows, error: ordersError } = await supabase.from("purchase_orders").select("id,organization_id,destination_organization_id,order_number,supplier,status,distribution_status,review_message,created_at,purchase_order_items(quantity,unit,products(id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url))").or(`organization_id.eq.${orgId},destination_organization_id.eq.${orgId}`).order("created_at", { ascending:false }).limit(250);
       if (ordersError) { setCloudStatus("Produtos sincronizados; falha no histórico"); return; }
       const cloudOrders: Order[] = (orderRows || []).map((row) => ({
         id: row.order_number,
@@ -192,10 +199,12 @@ export default function Home() {
         supplier: row.supplier,
         createdAt: row.created_at,
         status: row.status as Order["status"],
-        fulfillmentStage: normalizeFulfillmentStage(
-          (row as Record<string, unknown>).fulfillment_stage as string | undefined,
-          row.status
-        ),
+        fulfillmentStage: normalizeFulfillmentStage(row.distribution_status, row.status),
+        originOrganizationId: row.organization_id,
+        destinationOrganizationId: row.destination_organization_id,
+        originOrganizationName: row.organization_id === orgId ? (organization?.name || "Filial") : "Filial solicitante",
+        destinationOrganizationName: "Centro de Distribuição",
+        reviewMessage: row.review_message,
         items: (row.purchase_order_items || []).flatMap((item) =>
           item.products
             ? [{ ...fromCloudProduct(item.products as unknown as Record<string, unknown>), quantity: Number(item.quantity) }]
@@ -236,13 +245,12 @@ export default function Home() {
   }, [products]);
 
   const suppliers = useMemo(() => Array.from(new Set(products.map((p) => p.supplier))), [products]);
-  const categories = useMemo(() => ["Todas", ...Array.from(new Set(products.filter((p) => p.supplier === supplier).map((p) => p.category)))], [products, supplier]);
+  const categories = useMemo(() => ["Todas", ...Array.from(new Set(products.filter((p) => supplier === "Todos" || p.supplier === supplier).map((p) => p.category)))], [products, supplier]);
   const filtered = useMemo(() => {
     const normalized = search.toLocaleLowerCase("pt-BR").trim();
-    return products.filter((p) => p.supplier === supplier && (category === "Todas" || p.category === category) && (!normalized || `${p.code} ${p.description}`.toLocaleLowerCase("pt-BR").includes(normalized)) && (!onlySelected || (quantities[p.id] || 0) > 0));
+    return products.filter((p) => (supplier === "Todos" || p.supplier === supplier) && (category === "Todas" || p.category === category) && (!normalized || `${p.code} ${p.description} ${p.supplier}`.toLocaleLowerCase("pt-BR").includes(normalized)) && (!onlySelected || (quantities[p.id] || 0) > 0));
   }, [products, supplier, category, search, onlySelected, quantities]);
   const selectedItems = useMemo(() => products.filter((p) => (quantities[p.id] || 0) > 0).map((p) => ({ ...p, quantity: quantities[p.id] })), [products, quantities]);
-  const supplierItems = selectedItems.filter((p) => p.supplier === supplier);
   const totalUnits = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
   const visibleNavItems = useMemo(() => navItems.filter((item) => !item.permission || can(access, item.permission)), [access]);
 
@@ -259,15 +267,19 @@ export default function Home() {
     setSavingOrder(true);
     const order: Order = {
       id: `PED-${String(Date.now()).slice(-6)}`,
-      supplier: supplierItems.length === selectedItems.length ? supplier : "Vários fornecedores",
+      supplier: Array.from(new Set(selectedItems.map((item)=>item.supplier))).length === 1 ? selectedItems[0].supplier : "Vários fornecedores",
       createdAt: new Date().toISOString(),
       status,
-      fulfillmentStage: status === "Finalizado" ? "processing" : "pending",
+      fulfillmentStage: status === "Finalizado" ? "submitted" : "draft",
+      originOrganizationId: organizationId || undefined,
+      destinationOrganizationId: destinationOrganizationId || undefined,
+      originOrganizationName: organizationName,
+      destinationOrganizationName: "Centro de Distribuição",
       items: selectedItems,
     };
     try {
-      if (organizationId && user) {
-        const { data: saved, error } = await supabase.from("purchase_orders").insert({ organization_id:organizationId, order_number:order.id, supplier:order.supplier, status, created_by:user.id }).select("id").single();
+      if (organizationId && destinationOrganizationId && user) {
+        const { data: saved, error } = await supabase.from("purchase_orders").insert({ organization_id:organizationId, destination_organization_id:destinationOrganizationId, order_number:order.id, supplier:order.supplier, status, distribution_status: status === "Finalizado" ? "submitted" : "draft", created_by:user.id }).select("id").single();
         if (error || !saved) throw error || new Error("Pedido não retornado pelo banco");
         order.dbId = saved.id;
         const { error: itemError } = await supabase.from("purchase_order_items").insert(selectedItems.map((item)=>({order_id:saved.id,product_id:item.id,quantity:item.quantity,unit:item.unit})));
@@ -275,7 +287,7 @@ export default function Home() {
       }
       const updated = [order, ...orders];
       setOrders(updated); localStorage.setItem("pedido-central-orders", JSON.stringify(updated));
-      toast.success(status === "Finalizado" ? "Pedido finalizado e sincronizado." : "Rascunho salvo e sincronizado.");
+      toast.success(status === "Finalizado" ? "Pedido enviado ao Centro de Distribuição." : "Rascunho salvo.");
       if (status === "Finalizado") {
         setQuantities({});
         setOrderTab("history");
@@ -306,16 +318,16 @@ export default function Home() {
     const requiredPermission = creatingProduct ? "products.create" : "products.edit";
     if (!can(access, requiredPermission)) return void toast.error("Seu perfil não pode salvar produtos.");
     if (!product.description.trim() || !product.supplier.trim()) return void toast.error("Descrição e fornecedor são obrigatórios.");
-    const payload = { code:product.code||null,description:product.description.trim(),brand:product.brand.trim(),supplier:product.supplier.trim(),category:product.category.trim()||"Diversos",unit:product.unit.trim()||"un",stock:product.stock,cost:product.cost??null,price:product.price??null,ncm:product.ncm||null,image_url:product.image };
+    const payload = { code:product.code||null,description:product.description.trim(),brand:product.brand.trim(),supplier:product.supplier.trim(),category:product.category.trim()||"Diversos",unit:product.unit.trim()||"un",stock:product.stock,cost:product.cost??null,price:product.price??null,ncm:product.ncm||null,barcode:product.barcode||null,image_url:product.image };
     try {
       let savedProduct = product;
       if (organizationId) {
         if (creatingProduct) {
-          const { data, error } = await supabase.from("products").insert({ ...payload, organization_id:organizationId, created_by:user?.id }).select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,image_url").single();
+          const { data, error } = await supabase.from("products").insert({ ...payload, organization_id:organizationId, created_by:user?.id }).select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url").single();
           if (error || !data) throw error || new Error("Produto não retornado");
           savedProduct = fromCloudProduct(data);
         } else {
-          const { data, error } = await supabase.from("products").update(payload).eq("id",product.id).eq("organization_id",organizationId).select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,image_url").single();
+          const { data, error } = await supabase.from("products").update(payload).eq("id",product.id).eq("organization_id",organizationId).select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url").single();
           if (error || !data) throw error || new Error("Produto não atualizado");
           savedProduct = fromCloudProduct(data);
         }
@@ -374,7 +386,7 @@ export default function Home() {
     if (!can(access, "products.create")) return void toast.error("Seu perfil não pode cadastrar produtos.");
     setCreatingProduct(true);
     setProductModalTab("dados");
-    setProductModal({ id:`new-${Date.now()}`,supplier:supplier || "",brand:"",code:"",description:"",category:"Diversos",unit:"un",stock:0,suggested:0,image:null,sourceRow:0,cost:null,price:null,ncm:"",barcode:"" });
+    setProductModal({ id:`new-${Date.now()}`,supplier:supplier === "Todos" ? "" : supplier,brand:"",code:"",description:"",category:"Diversos",unit:"un",stock:0,suggested:0,image:null,sourceRow:0,cost:null,price:null,ncm:"",barcode:"" });
   }
 
   function repeatOrder(order: Order) {
@@ -400,19 +412,16 @@ export default function Home() {
 
   async function updateOrderStage(orderId: string, stage: FulfillmentStage) {
     if (!can(access, "orders.manage")) return void toast.error("Seu perfil não pode alterar etapas.");
-    const updated = orders.map((o) => (o.id === orderId ? { ...o, fulfillmentStage: stage } : o));
-    setOrders(updated);
-    localStorage.setItem("pedido-central-orders", JSON.stringify(updated));
-    const target = updated.find((o) => o.id === orderId);
-    if (target?.dbId && organizationId) {
-      try {
-        await supabase.from("purchase_orders").update({ fulfillment_stage: stage }).eq("id", target.dbId);
-      } catch (e) {
-        console.warn("Could not sync fulfillment stage to cloud", e);
-      }
-    }
+    const target = orders.find((o) => o.id === orderId);
+    if (!target?.dbId) return;
+    const message = stage === "rejected" ? window.prompt("Informe o motivo da rejeição para a filial:")?.trim() || "" : "";
+    if (stage === "rejected" && message.length < 3) return void toast.error("Informe o motivo da rejeição.");
+    const { error } = await supabase.rpc("transition_distribution_order", { p_order_id:target.dbId, p_status:stage, p_message:message });
+    if (error) return void toast.error(error.message.includes("Transição") ? "Siga a próxima etapa do fluxo; não é possível pular etapas." : error.message);
+    const updated = orders.map((o) => (o.id === orderId ? { ...o, fulfillmentStage: stage, reviewMessage: message || o.reviewMessage } : o));
+    setOrders(updated); localStorage.setItem("pedido-central-orders", JSON.stringify(updated));
     const stageInfo = FULFILLMENT_STAGES.find((s) => s.key === stage);
-    toast.success(`Etapa atualizada para: ${stageInfo?.label || stage} (${stageInfo?.labelEn || stage})`);
+    toast.success(`Pedido atualizado: ${stageInfo?.label || stage}.`);
   }
 
   if (authLoading) return <main className="auth-page"><div className="auth-loading">Carregando acesso seguro...</div></main>;
@@ -420,7 +429,7 @@ export default function Home() {
   return <div className="app-shell">
     <Toaster richColors position="top-right" />
     <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
-      <div className="brand"><div className="brand-mark"><Image src="/brand/casa-das-mangueiras-logo.webp" width={40} height={40} priority alt="Casa das Mangueiras" /></div><div><strong>CDM</strong><span>Casa das Mangueiras</span></div><button className="mobile-close" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X /></button></div>
+      <div className="brand"><div className="brand-mark"><Image src="/brand/casa-das-mangueiras-logo.webp" width={40} height={40} priority alt="Casa das Mangueiras" /></div><div><strong>CDM</strong><span>{organizationName}</span></div><button className="mobile-close" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X /></button></div>
       <nav><p className="nav-label">OPERAÇÃO</p>{visibleNavItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => { setView(item.id); setSidebarOpen(false); }}><Icon size={19} /><span>{item.label}</span>{item.id === "order" && selectedItems.length > 0 && <b>{selectedItems.length}</b>}</button>; })}</nav>
       <div className="sidebar-foot"><div className="user-card"><div className="avatar">{(user.email?.[0] || "C").toUpperCase()}</div><div><strong>{user.email?.split("@")[0] || "Equipe CDM"}</strong><span>{access?.role === "support" ? "Suporte · acesso total" : cloudStatus}</span></div></div></div>
     </aside>
@@ -492,7 +501,8 @@ function Products({ products, canCreate, canEdit, canImport, onEdit, onCreate, o
   const [term, setTerm] = useState(""); const [supplierFilter, setSupplierFilter] = useState("Todos"); const [limit, setLimit] = useState(120);
   const suppliers = useMemo(() => Array.from(new Set(products.map((p) => p.supplier))).sort((a,b) => a.localeCompare(b, "pt-BR")), [products]);
   const filtered = useMemo(() => products.filter((p) => (supplierFilter === "Todos" || p.supplier === supplierFilter) && `${p.description} ${p.code} ${p.supplier} ${p.brand}`.toLowerCase().includes(term.toLowerCase())), [products, supplierFilter, term]);
-  return <section className="content"><div className="page-heading"><div><span className="eyebrow">CATÁLOGO MESTRE</span><h1>Produtos</h1><p>Base unificada, sem duplicidades e pronta para receber novas planilhas.</p></div><div className="heading-actions">{canCreate && <Button variant="outline" onClick={onCreate}><Plus size={17}/> Novo produto</Button>}{canImport && <Button onClick={onImport}><Upload size={17} /> Importar planilha</Button>}</div></div><div className="products-toolbar"><div className="inline-search"><Search size={17} /><Input value={term} onChange={(e) => { setTerm(e.target.value); setLimit(120); }} placeholder="Pesquisar produto, código, marca ou fornecedor..." /></div><div className="select-wrap"><select value={supplierFilter} onChange={(e) => { setSupplierFilter(e.target.value); setLimit(120); }}><option>Todos</option>{suppliers.map((name) => <option key={name}>{name}</option>)}</select><ChevronDown size={14} /></div><Badge variant="secondary">{filtered.length.toLocaleString("pt-BR")} produtos</Badge></div><div className="product-grid">{filtered.slice(0, limit).map((product) => <div key={product.id} className="product-card flex items-start justify-between gap-2 p-3"><div className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer" onClick={() => canEdit ? onEdit(product, "dados") : undefined}><div className="card-image">{product.image ? <img src={product.image} alt="" /> : <PackagePlus />}</div><div className="flex-1 min-w-0"><span>{product.supplier} · {product.code || product.category}</span><strong>{product.description}</strong><small>{product.brand !== product.supplier ? `${product.brand} · ` : ""}Estoque: {product.stock} {product.unit}</small></div></div><button type="button" className="p-2 text-[#9c8e90] hover:text-[#790a0e] hover:bg-[#f6e8ea] rounded-lg transition shrink-0" title="Ver código de barras / QR Code deste produto" onClick={(e) => { e.stopPropagation(); onEdit(product, "codigo"); }}><Barcode size={18} /></button></div>)}</div>{filtered.length > limit && <div className="load-more"><Button variant="outline" onClick={() => setLimit((value) => value + 120)}>Mostrar mais produtos ({(filtered.length - limit).toLocaleString("pt-BR")})</Button></div>}</section>;
+  const money=(value?:number|null)=>value==null?"—":new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(value);
+  return <section className="content"><div className="page-heading"><div><span className="eyebrow">CATÁLOGO MESTRE</span><h1>Produtos</h1><p>Produtos, custos, preços, estoque e EAN‑13 em uma base organizada.</p></div><div className="heading-actions">{canCreate && <Button variant="outline" onClick={onCreate}><Plus size={17}/> Novo produto</Button>}{canImport && <Button onClick={onImport}><Upload size={17} /> Importar planilha</Button>}</div></div><div className="products-toolbar"><div className="inline-search"><Search size={17} /><Input value={term} onChange={(e) => { setTerm(e.target.value); setLimit(120); }} placeholder="Pesquisar produto, código, marca ou fornecedor..." /></div><div className="select-wrap"><select value={supplierFilter} onChange={(e) => { setSupplierFilter(e.target.value); setLimit(120); }}><option>Todos</option>{suppliers.map((name) => <option key={name}>{name}</option>)}</select><ChevronDown size={14} /></div><Badge variant="secondary">{filtered.length.toLocaleString("pt-BR")} produtos</Badge></div><div className="product-grid">{filtered.slice(0, limit).map((product) => <div key={product.id} className="product-card flex items-start justify-between gap-2 p-3"><div className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer" onClick={() => canEdit ? onEdit(product, "dados") : undefined}><div className="card-image">{product.image ? <img src={product.image} alt="" /> : <PackagePlus />}</div><div className="flex-1 min-w-0"><span>{product.supplier} · {product.code || product.category}</span><strong>{product.description}</strong><small>{product.brand !== product.supplier ? `${product.brand} · ` : ""}Estoque: {product.stock} {product.unit}</small><small className="mt-1 flex gap-3"><b>Custo: {money(product.cost)}</b><b className="text-emerald-700">Venda: {money(product.price)}</b></small></div></div><button type="button" className="p-2 text-[#9c8e90] hover:text-[#790a0e] hover:bg-[#f6e8ea] rounded-lg transition shrink-0" title="Ver código de barras EAN-13" onClick={(e) => { e.stopPropagation(); onEdit(product, "codigo"); }}><Barcode size={18} /></button></div>)}</div>{filtered.length > limit && <div className="load-more"><Button variant="outline" onClick={() => setLimit((value) => value + 120)}>Mostrar mais produtos ({(filtered.length - limit).toLocaleString("pt-BR")})</Button></div>}</section>;
 }
 
 function ProductEditor({ product, initialTab = "dados", onSave }: { product: Product; initialTab?: "dados" | "codigo"; onSave: (product: Product) => void }) {
@@ -531,7 +541,7 @@ function ProductEditor({ product, initialTab = "dados", onSave }: { product: Pro
           }`}
         >
           <Barcode className="h-4 w-4" />
-          Código de barras & QR Code (Inventário)
+          Código de barras EAN‑13
         </button>
       </div>
 

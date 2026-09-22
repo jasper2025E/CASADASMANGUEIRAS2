@@ -140,7 +140,7 @@ export function GlobalSystemDashboard({
     );
     const inTransitOrders = orders.filter((o) => {
       const stage = normalizeFulfillmentStage(o.fulfillmentStage, o.status);
-      return stage === "processing" || stage === "shipped";
+      return ["received", "approved", "separating", "shipped"].includes(stage);
     });
 
     // Critical low stock items (top 5 prioritized)

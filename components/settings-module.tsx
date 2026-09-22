@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Building2, Check, Clipboard, KeyRound, Link2, LockKeyhole, LogOut, RefreshCw, ShieldCheck, Trash2, UserCheck, UserRound, Users } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Building2, Check, Clipboard, KeyRound, LockKeyhole, LogOut, RefreshCw, ShieldCheck, Trash2, UserCheck, UserRound, Users } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,6 @@ type Member = {
   user_id: string;
   email: string;
   full_name: string;
-  slug: string;
   role: MemberRole;
   permissions: string[];
   active: boolean;
@@ -42,7 +41,7 @@ export function SettingsModule({ user, organizationId, onOrganizationChange }: {
   const [draftActive, setDraftActive] = useState(true);
 
   const currentMember = members.find((member) => member.user_id === user.id);
-  const currentAccess: UserAccess | null = currentMember ? { role: currentMember.role, permissions: currentMember.permissions, active: currentMember.active, slug: currentMember.slug } : null;
+  const currentAccess: UserAccess | null = currentMember ? { role: currentMember.role, permissions: currentMember.permissions, active: currentMember.active } : null;
   const canManageUsers = can(currentAccess, "users.manage");
   const canManageSettings = can(currentAccess, "settings.manage");
   const editingMember = members.find((member) => member.user_id === editingId) || null;
@@ -155,11 +154,9 @@ export function SettingsModule({ user, organizationId, onOrganizationChange }: {
     onOrganizationChange(id);
   }
 
-  const profileUrl = useMemo(() => currentMember && typeof window !== "undefined" ? `${window.location.origin}/u/${currentMember.slug}` : "", [currentMember]);
-
   return <section className="content settings-module">
     <div className="page-heading">
-      <div><span className="eyebrow">ADMINISTRAÇÃO E SEGURANÇA</span><h1>Usuários e acessos</h1><p>Perfis isolados, URL individual e permissões por função.</p></div>
+      <div><span className="eyebrow">ADMINISTRAÇÃO E SEGURANÇA</span><h1>Usuários e acessos</h1><p>Dados isolados por organização e permissões configuráveis por função.</p></div>
       <Button variant="outline" onClick={() => void loadSettings()} disabled={loading}><RefreshCw size={16}/> Atualizar</Button>
     </div>
 
@@ -175,7 +172,6 @@ export function SettingsModule({ user, organizationId, onOrganizationChange }: {
         <div className="settings-title"><UserRound/><div><h2>Minha conta</h2><span>Perfil autenticado e isolado</span></div></div>
         <div className="account-line"><span>E-mail</span><strong>{user.email || "Não informado"}</strong></div>
         <div className="account-line"><span>Perfil</span><Badge variant="secondary">{currentMember ? roleLabels[currentMember.role] : "Carregando"}</Badge></div>
-        {profileUrl && <div className="profile-url"><span>Sua URL individual</span><code>{profileUrl}</code><Button variant="outline" onClick={() => void copyText(profileUrl, "URL individual copiada.")}><Link2 size={16}/> Copiar URL</Button></div>}
         <Button variant="outline" onClick={() => void supabase.auth.signOut()}><LogOut size={16}/> Sair do sistema</Button>
       </div>
 
@@ -200,7 +196,7 @@ export function SettingsModule({ user, organizationId, onOrganizationChange }: {
       <div className="balance-toolbar"><div><h2>Equipe e permissões</h2><span>{members.length} {members.length === 1 ? "usuário" : "usuários"} nesta organização</span></div><Users size={20}/></div>
       <div className="team-list">{members.map((member) => <div className={`team-row ${!member.active ? "member-disabled" : ""}`} key={member.user_id}>
         <div className="member-avatar">{member.user_id === user.id ? "EU" : (member.full_name || member.email).slice(0,2).toUpperCase()}</div>
-        <div className="member-identity"><strong>{member.full_name || member.email}</strong><span>{member.email} · /u/{member.slug}</span></div>
+        <div className="member-identity"><strong>{member.full_name || member.email}</strong><span>{member.email}</span></div>
         <Badge variant={member.active ? "secondary" : "outline"}>{member.active ? roleLabels[member.role] : "Suspenso"}</Badge>
         {canManageUsers && member.user_id !== user.id && member.role !== "support" && <Button variant="outline" onClick={() => openAccessEditor(member)}><LockKeyhole size={15}/> Autorizações</Button>}
         {canManageUsers && member.user_id !== user.id && member.role !== "support" && <button className="row-delete" onClick={() => void removeMember(member)} aria-label="Remover usuário"><Trash2 size={16}/></button>}
@@ -218,4 +214,3 @@ export function SettingsModule({ user, organizationId, onOrganizationChange }: {
     </div>}
   </section>;
 }
-
