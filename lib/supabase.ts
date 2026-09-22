@@ -6,6 +6,7 @@ const fallbackPublishableKey = "sb_publishable_E7N-GXI-CNrpHsCYkNZixQ_z6kOjkxR";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL || fallbackUrl;
 const key =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   fallbackPublishableKey;
 
 export const supabaseConfigured = Boolean(url && key);

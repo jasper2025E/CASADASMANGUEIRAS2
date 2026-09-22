@@ -78,9 +78,30 @@ export default function Home() {
   const [savingOrder, setSavingOrder] = useState(false);
 
   useEffect(() => {
-    void supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user || null); setAuthLoading(false); });
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => { setUser(session?.user || null); setAuthLoading(false); });
-    return () => data.subscription.unsubscribe();
+    let resolved = false;
+    const timeout = setTimeout(() => {
+      if (!resolved) setAuthLoading(false);
+    }, 2500);
+
+    void supabase.auth.getSession().then(({ data }) => {
+      resolved = true;
+      clearTimeout(timeout);
+      setUser(data.session?.user || null);
+      setAuthLoading(false);
+    }).catch(() => {
+      resolved = true;
+      clearTimeout(timeout);
+      setAuthLoading(false);
+    });
+
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+      setAuthLoading(false);
+    });
+    return () => {
+      clearTimeout(timeout);
+      data.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
