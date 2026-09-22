@@ -14,11 +14,21 @@ import { BalanceModule } from "@/components/balance-module";
 import { AuthScreen } from "@/components/auth-screen";
 import { SettingsModule } from "@/components/settings-module";
 import { ProductBarcode } from "@/components/product-barcode";
+import { OrderProgressStepper, OrderDetailProgress, normalizeFulfillmentStage, FULFILLMENT_STAGES, type FulfillmentStage } from "@/components/order-progress";
 import { supabase } from "@/lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
-type Product = { id: string; supplier: string; brand: string; code: string; description: string; category: string; unit: string; stock: number; suggested: number; image: string | null; sourceRow: number; cost?: number | null; price?: number | null; ncm?: string; barcode?: string };
-type Order = { id: string; dbId?: string; supplier: string; createdAt: string; status: "Rascunho" | "Finalizado"; items: Array<Product & { quantity: number }> };
+export type { FulfillmentStage };
+export type Product = { id: string; supplier: string; brand: string; code: string; description: string; category: string; unit: string; stock: number; suggested: number; image: string | null; sourceRow: number; cost?: number | null; price?: number | null; ncm?: string; barcode?: string };
+export type Order = {
+  id: string;
+  dbId?: string;
+  supplier: string;
+  createdAt: string;
+  status: "Rascunho" | "Finalizado";
+  fulfillmentStage?: FulfillmentStage | "Pending" | "Processing" | "Shipped" | "Delivered";
+  items: Array<Product & { quantity: number }>;
+};
 type ImportPreview = { fileName: string; rows: number; duplicates: number; invalid: number; products: Product[] };
 
 const supplierColors: Record<string, string> = { "Force Line": "#ea580c", Jamaica: "#a16207", "Tubo PU": "#7c3aed", Sucção: "#b91c1c", Bariflex: "#15803d" };
@@ -153,7 +163,22 @@ export default function Home() {
       }
       const { data: orderRows, error: ordersError } = await supabase.from("purchase_orders").select("id,order_number,supplier,status,created_at,purchase_order_items(quantity,unit,products(id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,image_url))").eq("organization_id", orgId).order("created_at", { ascending:false }).limit(250);
       if (ordersError) { setCloudStatus("Produtos sincronizados; falha no histórico"); return; }
-      const cloudOrders: Order[] = (orderRows || []).map((row) => ({ id:row.order_number,dbId:row.id,supplier:row.supplier,createdAt:row.created_at,status:row.status as Order["status"],items:(row.purchase_order_items || []).flatMap((item) => item.products ? [{...fromCloudProduct(item.products as unknown as Record<string, unknown>),quantity:Number(item.quantity)}] : []) }));
+      const cloudOrders: Order[] = (orderRows || []).map((row) => ({
+        id: row.order_number,
+        dbId: row.id,
+        supplier: row.supplier,
+        createdAt: row.created_at,
+        status: row.status as Order["status"],
+        fulfillmentStage: normalizeFulfillmentStage(
+          (row as Record<string, unknown>).fulfillment_stage as string | undefined,
+          row.status
+        ),
+        items: (row.purchase_order_items || []).flatMap((item) =>
+          item.products
+            ? [{ ...fromCloudProduct(item.products as unknown as Record<string, unknown>), quantity: Number(item.quantity) }]
+            : []
+        ),
+      }));
       if (!cancelled) {
         setProducts(cloudProducts);
         setOrders(cloudOrders);
@@ -202,7 +227,14 @@ export default function Home() {
     if (!selectedItems.length) return void toast.error("Adicione pelo menos um produto ao pedido.");
     if (savingOrder) return;
     setSavingOrder(true);
-    const order: Order = { id: `PED-${String(Date.now()).slice(-6)}`, supplier: supplierItems.length === selectedItems.length ? supplier : "Vários fornecedores", createdAt: new Date().toISOString(), status, items: selectedItems };
+    const order: Order = {
+      id: `PED-${String(Date.now()).slice(-6)}`,
+      supplier: supplierItems.length === selectedItems.length ? supplier : "Vários fornecedores",
+      createdAt: new Date().toISOString(),
+      status,
+      fulfillmentStage: status === "Finalizado" ? "processing" : "pending",
+      items: selectedItems,
+    };
     try {
       if (organizationId && user) {
         const { data: saved, error } = await supabase.from("purchase_orders").insert({ organization_id:organizationId, order_number:order.id, supplier:order.supplier, status, created_by:user.id }).select("id").single();
@@ -323,6 +355,22 @@ export default function Home() {
     toast.success("Pedido excluído.");
   }
 
+  async function updateOrderStage(orderId: string, stage: FulfillmentStage) {
+    const updated = orders.map((o) => (o.id === orderId ? { ...o, fulfillmentStage: stage } : o));
+    setOrders(updated);
+    localStorage.setItem("pedido-central-orders", JSON.stringify(updated));
+    const target = updated.find((o) => o.id === orderId);
+    if (target?.dbId && organizationId) {
+      try {
+        await supabase.from("purchase_orders").update({ fulfillment_stage: stage }).eq("id", target.dbId);
+      } catch (e) {
+        console.warn("Could not sync fulfillment stage to cloud", e);
+      }
+    }
+    const stageInfo = FULFILLMENT_STAGES.find((s) => s.key === stage);
+    toast.success(`Etapa atualizada para: ${stageInfo?.label || stage} (${stageInfo?.labelEn || stage})`);
+  }
+
   if (authLoading) return <main className="auth-page"><div className="auth-loading">Carregando acesso seguro...</div></main>;
   if (!user) return <AuthScreen />;
   return <div className="app-shell">
@@ -343,7 +391,7 @@ export default function Home() {
         </div>
       </section>}
       {view === "dashboard" && <Dashboard products={products} orders={orders} onNew={() => setView("order")} />}
-      {view === "history" && <History orders={orders} onRemove={removeOrder} onRepeat={repeatOrder} />}
+      {view === "history" && <History orders={orders} onRemove={removeOrder} onRepeat={repeatOrder} onUpdateStage={updateOrderStage} />}
       {view === "products" && <Products products={products} onEdit={(product, tab = "dados") => { setCreatingProduct(false); setProductModal(product); setProductModalTab(tab); }} onCreate={createProduct} onImport={() => setImportOpen(true)} />}
       {view === "balance" && <BalanceModule products={products} organizationId={organizationId} userId={user.id} />}
       {view === "settings" && (organizationId ? <SettingsModule user={user} organizationId={organizationId} onOrganizationChange={() => window.location.reload()} /> : <section className="content settings-unavailable"><div className="panel"><Settings size={30}/><div><span className="eyebrow">CONFIGURAÇÕES</span><h1>{cloudStatus.startsWith("Falha") ? "Não foi possível carregar agora" : "Preparando sua organização"}</h1><p>{cloudStatus.startsWith("Falha") ? "A conexão foi interrompida. Tente novamente; seus dados locais continuam preservados." : "Estamos conectando sua conta e preparando os dados da empresa."}</p></div><Button onClick={() => setSyncAttempt((attempt) => attempt + 1)} disabled={!cloudStatus.startsWith("Falha")}><RotateCcw size={16}/> Tentar novamente</Button></div></section>)}
@@ -355,12 +403,189 @@ export default function Home() {
 
 function Dashboard({ products, orders, onNew }: { products: Product[]; orders: Order[]; onNew: () => void }) {
   const suppliers = Array.from(new Set(products.map((p) => p.supplier))); const last = orders[0];
-  return <section className="content"><div className="page-heading"><div><span className="eyebrow">PAINEL</span><h1>Visão geral</h1><p>Produtos, fornecedores e pedidos em um só lugar.</p></div><Button onClick={onNew}><Plus size={17} /> Criar pedido</Button></div><div className="metric-grid"><div><span>Produtos cadastrados</span><strong>{products.length}</strong><small>Importados das planilhas</small></div><div><span>Fornecedores</span><strong>{suppliers.length}</strong><small>Catálogos unificados</small></div><div><span>Pedidos salvos</span><strong>{orders.length}</strong><small>{orders.filter((o) => o.status === "Finalizado").length} finalizados</small></div><div><span>Último pedido</span><strong className="small-metric">{last ? new Date(last.createdAt).toLocaleDateString("pt-BR") : "Nenhum"}</strong><small>{last?.supplier || "Comece um novo pedido"}</small></div></div><div className="dashboard-grid"><div className="panel"><div className="panel-heading"><h2>Catálogos por fornecedor</h2><span>Base atual</span></div>{suppliers.map((name) => <div className="supplier-line" key={name}><i style={{ background: supplierColors[name] }} /><div><strong>{name}</strong><span>{products.filter((p) => p.supplier === name).length} produtos</span></div><b>{Math.round(products.filter((p) => p.supplier === name).length / products.length * 100)}%</b></div>)}</div><div className="panel"><div className="panel-heading"><h2>Pedidos recentes</h2><span>{orders.length} registros</span></div>{orders.length ? orders.slice(0, 6).map((order) => <div className="recent-order" key={order.id}><div><strong>{order.id}</strong><span>{order.supplier} · {new Date(order.createdAt).toLocaleDateString("pt-BR")}</span></div><Badge variant="secondary">{order.status}</Badge><b>{order.items.length} itens</b></div>) : <div className="empty-panel"><ClipboardList /><strong>Nenhum pedido salvo</strong><span>Os pedidos finalizados aparecerão aqui.</span></div>}</div></div></section>;
+  return <section className="content"><div className="page-heading"><div><span className="eyebrow">PAINEL</span><h1>Visão geral</h1><p>Produtos, fornecedores e pedidos em um só lugar.</p></div><Button onClick={onNew}><Plus size={17} /> Criar pedido</Button></div><div className="metric-grid"><div><span>Produtos cadastrados</span><strong>{products.length}</strong><small>Importados das planilhas</small></div><div><span>Fornecedores</span><strong>{suppliers.length}</strong><small>Catálogos unificados</small></div><div><span>Pedidos salvos</span><strong>{orders.length}</strong><small>{orders.filter((o) => o.status === "Finalizado").length} finalizados</small></div><div><span>Último pedido</span><strong className="small-metric">{last ? new Date(last.createdAt).toLocaleDateString("pt-BR") : "Nenhum"}</strong><small>{last?.supplier || "Comece um novo pedido"}</small></div></div><div className="dashboard-grid"><div className="panel"><div className="panel-heading"><h2>Catálogos por fornecedor</h2><span>Base atual</span></div>{suppliers.map((name) => <div className="supplier-line" key={name}><i style={{ background: supplierColors[name] }} /><div><strong>{name}</strong><span>{products.filter((p) => p.supplier === name).length} produtos</span></div><b>{Math.round(products.filter((p) => p.supplier === name).length / products.length * 100)}%</b></div>)}</div><div className="panel"><div className="panel-heading"><h2>Pedidos recentes</h2><span>{orders.length} registros</span></div>{orders.length ? orders.slice(0, 6).map((order) => {
+    const stage = normalizeFulfillmentStage(order.fulfillmentStage, order.status);
+    const stageConf = FULFILLMENT_STAGES.find((s) => s.key === stage) || FULFILLMENT_STAGES[0];
+    const StageIcon = stageConf.icon;
+    return (
+      <div className="recent-order" key={order.id}>
+        <div>
+          <strong>{order.id}</strong>
+          <span>{order.supplier} · {new Date(order.createdAt).toLocaleDateString("pt-BR")}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${stageConf.badgeBg} ${stageConf.badgeText} ${stageConf.badgeBorder}`}>
+            <StageIcon size={12} />
+            {stageConf.label}
+          </span>
+        </div>
+        <b>{order.items.length} itens</b>
+      </div>
+    );
+  }) : <div className="empty-panel"><ClipboardList /><strong>Nenhum pedido salvo</strong><span>Os pedidos finalizados aparecerão aqui.</span></div>}</div></div></section>;
 }
 
-function History({ orders, onRemove, onRepeat }: { orders: Order[]; onRemove: (order: Order) => void; onRepeat: (order: Order) => void }) {
+function History({
+  orders,
+  onRemove,
+  onRepeat,
+  onUpdateStage,
+}: {
+  orders: Order[];
+  onRemove: (order: Order) => void;
+  onRepeat: (order: Order) => void;
+  onUpdateStage: (orderId: string, stage: FulfillmentStage) => void;
+}) {
   const [selected, setSelected] = useState<Order | null>(null);
-  return <section className="content"><div className="page-heading"><div><span className="eyebrow">REGISTROS</span><h1>Histórico de pedidos</h1><p>Consulte, confira e refaça pedidos sincronizados.</p></div></div><div className="panel table-panel"><div className="history-head"><span>Pedido</span><span>Fornecedor</span><span>Data</span><span>Itens</span><span>Status</span><span>Ações</span></div>{orders.length ? orders.map((order) => <div className="history-row" key={order.dbId || order.id}><strong>{order.id}</strong><span>{order.supplier}</span><span>{new Date(order.createdAt).toLocaleString("pt-BR")}</span><span>{order.items.length}</span><Badge variant={order.status === "Finalizado" ? "default" : "secondary"}>{order.status}</Badge><div className="row-actions"><button onClick={() => setSelected(order)} title="Ver itens"><Eye size={16} /></button><button onClick={() => onRepeat(order)} title="Repetir pedido"><RotateCcw size={16} /></button><button className="danger" onClick={() => void onRemove(order)} title="Excluir"><Trash2 size={16} /></button></div></div>) : <div className="empty-panel tall"><Archive /><strong>Histórico vazio</strong><span>Salve um rascunho ou finalize um pedido para começar.</span></div>}</div><Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}><DialogContent className="sm:max-w-[720px]"><DialogHeader><DialogTitle>Pedido {selected?.id}</DialogTitle></DialogHeader>{selected && <div className="order-detail"><div className="order-detail-meta"><span>{selected.supplier}</span><span>{new Date(selected.createdAt).toLocaleString("pt-BR")}</span><Badge>{selected.status}</Badge></div><div className="order-detail-list">{selected.items.map((item) => <div key={item.id}><div><strong>{item.description}</strong><span>{item.code || "Sem código"} · {item.supplier}</span></div><b>{item.quantity} {item.unit}</b></div>)}</div><Button onClick={() => { onRepeat(selected); setSelected(null); }}><RotateCcw size={16}/> Criar novo com estes itens</Button></div>}</DialogContent></Dialog></section>;
+
+  // Keep selected order in sync when stage is updated
+  const currentSelected = selected
+    ? orders.find((o) => o.id === selected.id) || selected
+    : null;
+
+  return (
+    <section className="content">
+      <div className="page-heading">
+        <div>
+          <span className="eyebrow">REGISTROS</span>
+          <h1>Histórico de pedidos</h1>
+          <p>Consulte, acompanhe o fluxo de atendimento por etapas e refaça pedidos com facilidade.</p>
+        </div>
+      </div>
+
+      <div className="panel table-panel">
+        <div className="history-head">
+          <span>Pedido</span>
+          <span>Fornecedor</span>
+          <span>Data</span>
+          <span>Itens</span>
+          <span>Atendimento (Etapa)</span>
+          <span>Ações</span>
+        </div>
+
+        {orders.length ? (
+          orders.map((order) => {
+            const currentStage = normalizeFulfillmentStage(
+              order.fulfillmentStage,
+              order.status
+            );
+            return (
+              <div className="history-row" key={order.dbId || order.id}>
+                <strong>{order.id}</strong>
+                <span>{order.supplier}</span>
+                <span>{new Date(order.createdAt).toLocaleString("pt-BR")}</span>
+                <span>{order.items.length} itens</span>
+
+                {/* Progress indicator for order fulfillment stages */}
+                <div className="fulfillment-cell">
+                  <OrderProgressStepper
+                    stage={currentStage}
+                    onSelectStage={(newStage) => onUpdateStage(order.id, newStage)}
+                    interactive={true}
+                  />
+                </div>
+
+                <div className="row-actions">
+                  <button onClick={() => setSelected(order)} title="Ver detalhes e etapas">
+                    <Eye size={16} />
+                  </button>
+                  <button onClick={() => onRepeat(order)} title="Repetir pedido">
+                    <RotateCcw size={16} />
+                  </button>
+                  <button
+                    className="danger"
+                    onClick={() => void onRemove(order)}
+                    title="Excluir"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="empty-panel tall">
+            <Archive />
+            <strong>Histórico vazio</strong>
+            <span>Salve um rascunho ou finalize um pedido para começar.</span>
+          </div>
+        )}
+      </div>
+
+      <Dialog
+        open={!!currentSelected}
+        onOpenChange={(open) => !open && setSelected(null)}
+      >
+        <DialogContent className="sm:max-w-[760px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Pedido {currentSelected?.id}</DialogTitle>
+          </DialogHeader>
+          {currentSelected && (
+            <div className="order-detail flex flex-col gap-4">
+              <div className="order-detail-meta flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <strong className="text-sm text-[#211718]">
+                    {currentSelected.supplier}
+                  </strong>
+                  <span className="text-xs text-[#7a6c6e]">
+                    {new Date(currentSelected.createdAt).toLocaleString("pt-BR")}
+                  </span>
+                </div>
+                <Badge
+                  variant={
+                    currentSelected.status === "Finalizado" ? "default" : "secondary"
+                  }
+                >
+                  {currentSelected.status}
+                </Badge>
+              </div>
+
+              {/* Expanded fulfillment progress indicator */}
+              <OrderDetailProgress
+                stage={normalizeFulfillmentStage(
+                  currentSelected.fulfillmentStage,
+                  currentSelected.status
+                )}
+                onSelectStage={(newStage) =>
+                  onUpdateStage(currentSelected.id, newStage)
+                }
+              />
+
+              <div className="order-detail-list">
+                {currentSelected.items.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between py-2 border-b border-[#ede5e6]"
+                  >
+                    <div>
+                      <strong>{item.description}</strong>
+                      <span className="block text-xs text-[#7a6c6e]">
+                        {item.code || "Sem código"} · {item.supplier}
+                      </span>
+                    </div>
+                    <b>
+                      {item.quantity} {item.unit}
+                    </b>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button
+                  onClick={() => {
+                    onRepeat(currentSelected);
+                    setSelected(null);
+                  }}
+                >
+                  <RotateCcw size={16} /> Criar novo com estes itens
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
 }
 
 function Products({ products, onEdit, onCreate, onImport }: { products: Product[]; onEdit: (product: Product, tab?: "dados" | "codigo") => void; onCreate: () => void; onImport: () => void }) {

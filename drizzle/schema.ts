@@ -21,6 +21,7 @@ export const orders = pgTable("orders", {
   id: text("id").primaryKey(),
   supplier: text("supplier").notNull(),
   status: text("status").notNull().default("Rascunho"),
+  fulfillmentStage: text("fulfillment_stage").default("pending"),
   items: jsonb("items").notNull().$type<unknown[]>(),
   createdAt: timestamp("created_at").defaultNow(),
 });
