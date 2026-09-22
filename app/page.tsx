@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { Archive, Boxes, Check, ChevronDown, ClipboardCheck, ClipboardList, Download, Eye, FileDown, FileSpreadsheet, LayoutDashboard, Menu, Minus, PackagePlus, Plus, Printer, RotateCcw, Search, Settings, ShoppingCart, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
+import { Archive, Barcode, Boxes, Check, ChevronDown, ClipboardCheck, ClipboardList, Download, Eye, FileDown, FileSpreadsheet, LayoutDashboard, Menu, Minus, PackagePlus, Plus, Printer, RotateCcw, Search, Settings, ShoppingCart, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
 import { jsPDF } from "jspdf";
 import productsSeed from "@/lib/products.json";
 import { Button } from "@/components/ui/button";
@@ -13,14 +13,15 @@ import { toast, Toaster } from "sonner";
 import { BalanceModule } from "@/components/balance-module";
 import { AuthScreen } from "@/components/auth-screen";
 import { SettingsModule } from "@/components/settings-module";
+import { ProductBarcode } from "@/components/product-barcode";
 import { supabase } from "@/lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
-type Product = { id: string; supplier: string; brand: string; code: string; description: string; category: string; unit: string; stock: number; suggested: number; image: string | null; sourceRow: number; cost?: number | null; price?: number | null; ncm?: string };
+type Product = { id: string; supplier: string; brand: string; code: string; description: string; category: string; unit: string; stock: number; suggested: number; image: string | null; sourceRow: number; cost?: number | null; price?: number | null; ncm?: string; barcode?: string };
 type Order = { id: string; dbId?: string; supplier: string; createdAt: string; status: "Rascunho" | "Finalizado"; items: Array<Product & { quantity: number }> };
 type ImportPreview = { fileName: string; rows: number; duplicates: number; invalid: number; products: Product[] };
 
-const supplierColors: Record<string, string> = { "Force Line": "#f97316", Jamaica: "#0ea5e9", "Tubo PU": "#8b5cf6", Sucção: "#ef4444", Bariflex: "#16a34a" };
+const supplierColors: Record<string, string> = { "Force Line": "#ea580c", Jamaica: "#a16207", "Tubo PU": "#7c3aed", Sucção: "#b91c1c", Bariflex: "#15803d" };
 const navItems = [
   { id: "dashboard", label: "Visão geral", icon: LayoutDashboard },
   { id: "order", label: "Novo pedido", icon: ShoppingCart },
@@ -64,6 +65,7 @@ export default function Home() {
   });
   const [onlySelected, setOnlySelected] = useState(false);
   const [productModal, setProductModal] = useState<Product | null>(null);
+  const [productModalTab, setProductModalTab] = useState<"dados" | "codigo">("dados");
   const [creatingProduct, setCreatingProduct] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
@@ -278,7 +280,8 @@ export default function Home() {
 
   function createProduct() {
     setCreatingProduct(true);
-    setProductModal({ id:`new-${Date.now()}`,supplier:supplier || "",brand:"",code:"",description:"",category:"Diversos",unit:"un",stock:0,suggested:0,image:null,sourceRow:0,cost:null,price:null,ncm:"" });
+    setProductModalTab("dados");
+    setProductModal({ id:`new-${Date.now()}`,supplier:supplier || "",brand:"",code:"",description:"",category:"Diversos",unit:"un",stock:0,suggested:0,image:null,sourceRow:0,cost:null,price:null,ncm:"",barcode:"" });
   }
 
   function repeatOrder(order: Order) {
@@ -314,17 +317,17 @@ export default function Home() {
         <div className="page-heading"><div><span className="eyebrow">COMPRAS</span><h1>Novo pedido</h1><p>Selecione o fornecedor, confira o estoque e informe o que precisa comprar.</p></div><div className="heading-actions"><Button variant="outline" disabled={savingOrder} onClick={() => saveOrder("Rascunho")}>Salvar rascunho</Button><Button disabled={savingOrder} onClick={() => saveOrder("Finalizado")}><Check size={17} /> {savingOrder ? "Salvando..." : "Finalizar pedido"}</Button></div></div>
         <div className="supplier-selector"><div><span>Fornecedor do pedido</span><strong>{suppliers.length.toLocaleString("pt-BR")} fornecedores cadastrados</strong></div><div className="select-wrap supplier-select"><Boxes size={17} /><select value={supplier} onChange={(e) => { setSupplier(e.target.value); setCategory("Todas"); }}>{suppliers.map((name) => <option key={name}>{name}</option>)}</select><ChevronDown size={15} /></div><Badge variant="secondary">{products.filter((p) => p.supplier === supplier).length.toLocaleString("pt-BR")} produtos</Badge></div>
         <div className="order-layout"><div className="catalog-card"><div className="catalog-toolbar"><div><h2>Produtos de {supplier}</h2><span>{filtered.length} produtos encontrados</span></div><div className="filters"><div className="select-wrap"><SlidersHorizontal size={16} /><select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((name) => <option key={name}>{name}</option>)}</select><ChevronDown size={14} /></div><button className={onlySelected ? "filter-active" : ""} onClick={() => setOnlySelected((v) => !v)}>Somente adicionados</button></div></div>
-          <div className="product-list-head"><span>Produto</span><span>Estoque</span><span>Quantidade do pedido</span></div><div className="product-list">{filtered.map((product) => { const quantity = quantities[product.id] || 0; return <article className={`product-row ${quantity > 0 ? "has-quantity" : ""}`} key={product.id}><div className="product-main"><button className="product-image" onClick={() => setProductModal(product)} aria-label={`Editar ${product.description}`}>{product.image ? <img src={product.image} alt="" /> : <PackagePlus size={25} />}</button><div><div className="product-meta">{product.code || product.category}</div><strong>{product.description}</strong><span>{product.category} · unidade: {product.unit}</span></div></div><div className="stock"><strong>{product.stock}</strong><span>{product.unit}</span></div><div className="quantity-control"><button onClick={() => setQuantity(product.id, quantity - 1)} disabled={quantity === 0} aria-label="Diminuir"><Minus size={16} /></button><input aria-label={`Quantidade de ${product.description}`} type="number" min="0" value={quantity || ""} placeholder="0" onChange={(e) => setQuantity(product.id, Number(e.target.value))} /><button onClick={() => setQuantity(product.id, quantity + 1)} aria-label="Aumentar"><Plus size={16} /></button><span>{product.unit}</span></div></article>; })}</div></div>
+          <div className="product-list-head"><span>Produto</span><span>Estoque</span><span>Quantidade do pedido</span></div><div className="product-list">{filtered.map((product) => { const quantity = quantities[product.id] || 0; return <article className={`product-row ${quantity > 0 ? "has-quantity" : ""}`} key={product.id}><div className="product-main"><button className="product-image" onClick={() => { setProductModal(product); setProductModalTab("dados"); }} aria-label={`Editar ${product.description}`}>{product.image ? <img src={product.image} alt="" /> : <PackagePlus size={25} />}</button><div><div className="product-meta flex items-center justify-between gap-2"><span>{product.code || product.category}</span><button type="button" onClick={(e) => { e.stopPropagation(); setProductModal(product); setProductModalTab("codigo"); }} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#f6e8ea] text-[#790a0e] hover:bg-[#eed5d8] border border-[#eed5d8] transition" title="Código de barras / QR Code (Leitor de inventário)"><Barcode size={12} /><span>Barras/QR</span></button></div><strong>{product.description}</strong><span>{product.category} · unidade: {product.unit}</span></div></div><div className="stock"><strong>{product.stock}</strong><span>{product.unit}</span></div><div className="quantity-control"><button onClick={() => setQuantity(product.id, quantity - 1)} disabled={quantity === 0} aria-label="Diminuir"><Minus size={16} /></button><input aria-label={`Quantidade de ${product.description}`} type="number" min="0" value={quantity || ""} placeholder="0" onChange={(e) => setQuantity(product.id, Number(e.target.value))} /><button onClick={() => setQuantity(product.id, quantity + 1)} aria-label="Aumentar"><Plus size={16} /></button><span>{product.unit}</span></div></article>; })}</div></div>
           <aside className="order-summary"><div className="summary-title"><div><ShoppingCart size={19} /><h2>Resumo do pedido</h2></div><Badge>{selectedItems.length} itens</Badge></div>{selectedItems.length === 0 ? <div className="empty-summary"><ShoppingCart size={29} /><strong>Seu pedido está vazio</strong><span>Informe a quantidade ao lado dos produtos.</span></div> : <div className="summary-items">{selectedItems.slice(0, 8).map((item) => <div key={item.id}><i style={{ background: supplierColors[item.supplier] }} /><div><strong>{item.description}</strong><span>{item.supplier}</span></div><b>{item.quantity} {item.unit}</b><button onClick={() => setQuantity(item.id, 0)} aria-label="Remover"><Trash2 size={15} /></button></div>)}{selectedItems.length > 8 && <p>+ {selectedItems.length - 8} outros produtos</p>}</div>}<div className="summary-total"><span>Total solicitado</span><strong>{totalUnits.toLocaleString("pt-BR")} <small>unidades/medidas</small></strong></div><div className="export-label">EXPORTAR OU COMPARTILHAR</div><div className="export-grid"><button onClick={exportPdf}><FileDown size={18} /><span>Baixar PDF</span></button><button onClick={exportXlsx}><Download size={18} /><span>Baixar XLSX</span></button><button onClick={() => window.print()}><Printer size={18} /><span>Imprimir</span></button></div><Button className="w-full" disabled={savingOrder} onClick={() => saveOrder("Finalizado")}><Check size={17} /> {savingOrder ? "Salvando..." : "Finalizar e salvar"}</Button></aside>
         </div>
       </section>}
       {view === "dashboard" && <Dashboard products={products} orders={orders} onNew={() => setView("order")} />}
       {view === "history" && <History orders={orders} onRemove={removeOrder} onRepeat={repeatOrder} />}
-      {view === "products" && <Products products={products} onEdit={(product) => { setCreatingProduct(false); setProductModal(product); }} onCreate={createProduct} onImport={() => setImportOpen(true)} />}
+      {view === "products" && <Products products={products} onEdit={(product, tab = "dados") => { setCreatingProduct(false); setProductModal(product); setProductModalTab(tab); }} onCreate={createProduct} onImport={() => setImportOpen(true)} />}
       {view === "balance" && <BalanceModule products={products} organizationId={organizationId} userId={user.id} />}
       {view === "settings" && (organizationId ? <SettingsModule user={user} organizationId={organizationId} onOrganizationChange={() => window.location.reload()} /> : <section className="content settings-unavailable"><div className="panel"><Settings size={30}/><div><span className="eyebrow">CONFIGURAÇÕES</span><h1>{cloudStatus.startsWith("Falha") ? "Não foi possível carregar agora" : "Preparando sua organização"}</h1><p>{cloudStatus.startsWith("Falha") ? "A conexão foi interrompida. Tente novamente; seus dados locais continuam preservados." : "Estamos conectando sua conta e preparando os dados da empresa."}</p></div><Button onClick={() => setSyncAttempt((attempt) => attempt + 1)} disabled={!cloudStatus.startsWith("Falha")}><RotateCcw size={16}/> Tentar novamente</Button></div></section>)}
     </main>
-    <Dialog open={!!productModal} onOpenChange={(open) => { if (!open) { setProductModal(null); setCreatingProduct(false); } }}><DialogContent className="sm:max-w-[620px]"><DialogHeader><DialogTitle>{creatingProduct ? "Cadastrar produto" : "Editar produto"}</DialogTitle></DialogHeader>{productModal && <ProductEditor product={productModal} onSave={saveProduct} />}</DialogContent></Dialog>
+    <Dialog open={!!productModal} onOpenChange={(open) => { if (!open) { setProductModal(null); setCreatingProduct(false); } }}><DialogContent className="sm:max-w-[680px] max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>{creatingProduct ? "Cadastrar produto" : "Detalhes do produto"}</DialogTitle></DialogHeader>{productModal && <ProductEditor key={`${productModal.id}-${productModalTab}`} product={productModal} initialTab={productModalTab} onSave={saveProduct} />}</DialogContent></Dialog>
     <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) setImportPreview(null); }}><DialogContent className="sm:max-w-[600px]"><DialogHeader><DialogTitle>Importar novos produtos</DialogTitle></DialogHeader><div className="import-box"><label className="file-drop"><FileSpreadsheet size={30} /><strong>{importing ? "Analisando a planilha..." : "Selecionar planilha de produtos"}</strong><span>XLSX, XLS ou CSV · os produtos repetidos serão ignorados</span><input type="file" accept=".xlsx,.xls,.csv" disabled={importing} onChange={(e) => inspectImport(e.target.files?.[0])} /></label>{importPreview && <div className="import-result"><div><span>Arquivo</span><strong>{importPreview.fileName}</strong></div><div className="import-metrics"><article><strong>{importPreview.rows.toLocaleString("pt-BR")}</strong><span>linhas lidas</span></article><article className="success"><strong>{importPreview.products.length.toLocaleString("pt-BR")}</strong><span>produtos novos</span></article><article><strong>{importPreview.duplicates.toLocaleString("pt-BR")}</strong><span>duplicados ignorados</span></article><article><strong>{importPreview.invalid.toLocaleString("pt-BR")}</strong><span>linhas inválidas</span></article></div><p>A comparação usa o código do produto. Sem código, utiliza descrição e fornecedor.</p><Button className="w-full" disabled={!importPreview.products.length} onClick={confirmImport}><Upload size={17} /> Confirmar importação</Button></div>}</div></DialogContent></Dialog>
   </div>;
 }
@@ -339,15 +342,154 @@ function History({ orders, onRemove, onRepeat }: { orders: Order[]; onRemove: (o
   return <section className="content"><div className="page-heading"><div><span className="eyebrow">REGISTROS</span><h1>Histórico de pedidos</h1><p>Consulte, confira e refaça pedidos sincronizados.</p></div></div><div className="panel table-panel"><div className="history-head"><span>Pedido</span><span>Fornecedor</span><span>Data</span><span>Itens</span><span>Status</span><span>Ações</span></div>{orders.length ? orders.map((order) => <div className="history-row" key={order.dbId || order.id}><strong>{order.id}</strong><span>{order.supplier}</span><span>{new Date(order.createdAt).toLocaleString("pt-BR")}</span><span>{order.items.length}</span><Badge variant={order.status === "Finalizado" ? "default" : "secondary"}>{order.status}</Badge><div className="row-actions"><button onClick={() => setSelected(order)} title="Ver itens"><Eye size={16} /></button><button onClick={() => onRepeat(order)} title="Repetir pedido"><RotateCcw size={16} /></button><button className="danger" onClick={() => void onRemove(order)} title="Excluir"><Trash2 size={16} /></button></div></div>) : <div className="empty-panel tall"><Archive /><strong>Histórico vazio</strong><span>Salve um rascunho ou finalize um pedido para começar.</span></div>}</div><Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}><DialogContent className="sm:max-w-[720px]"><DialogHeader><DialogTitle>Pedido {selected?.id}</DialogTitle></DialogHeader>{selected && <div className="order-detail"><div className="order-detail-meta"><span>{selected.supplier}</span><span>{new Date(selected.createdAt).toLocaleString("pt-BR")}</span><Badge>{selected.status}</Badge></div><div className="order-detail-list">{selected.items.map((item) => <div key={item.id}><div><strong>{item.description}</strong><span>{item.code || "Sem código"} · {item.supplier}</span></div><b>{item.quantity} {item.unit}</b></div>)}</div><Button onClick={() => { onRepeat(selected); setSelected(null); }}><RotateCcw size={16}/> Criar novo com estes itens</Button></div>}</DialogContent></Dialog></section>;
 }
 
-function Products({ products, onEdit, onCreate, onImport }: { products: Product[]; onEdit: (product: Product) => void; onCreate: () => void; onImport: () => void }) {
+function Products({ products, onEdit, onCreate, onImport }: { products: Product[]; onEdit: (product: Product, tab?: "dados" | "codigo") => void; onCreate: () => void; onImport: () => void }) {
   const [term, setTerm] = useState(""); const [supplierFilter, setSupplierFilter] = useState("Todos"); const [limit, setLimit] = useState(120);
   const suppliers = useMemo(() => Array.from(new Set(products.map((p) => p.supplier))).sort((a,b) => a.localeCompare(b, "pt-BR")), [products]);
   const filtered = useMemo(() => products.filter((p) => (supplierFilter === "Todos" || p.supplier === supplierFilter) && `${p.description} ${p.code} ${p.supplier} ${p.brand}`.toLowerCase().includes(term.toLowerCase())), [products, supplierFilter, term]);
-  return <section className="content"><div className="page-heading"><div><span className="eyebrow">CATÁLOGO MESTRE</span><h1>Produtos</h1><p>Base unificada, sem duplicidades e pronta para receber novas planilhas.</p></div><div className="heading-actions"><Button variant="outline" onClick={onCreate}><Plus size={17}/> Novo produto</Button><Button onClick={onImport}><Upload size={17} /> Importar planilha</Button></div></div><div className="products-toolbar"><div className="inline-search"><Search size={17} /><Input value={term} onChange={(e) => { setTerm(e.target.value); setLimit(120); }} placeholder="Pesquisar produto, código, marca ou fornecedor..." /></div><div className="select-wrap"><select value={supplierFilter} onChange={(e) => { setSupplierFilter(e.target.value); setLimit(120); }}><option>Todos</option>{suppliers.map((name) => <option key={name}>{name}</option>)}</select><ChevronDown size={14} /></div><Badge variant="secondary">{filtered.length.toLocaleString("pt-BR")} produtos</Badge></div><div className="product-grid">{filtered.slice(0, limit).map((product) => <button key={product.id} className="product-card" onClick={() => onEdit(product)}><div className="card-image">{product.image ? <img src={product.image} alt="" /> : <PackagePlus />}</div><div><span>{product.supplier} · {product.code || product.category}</span><strong>{product.description}</strong><small>{product.brand !== product.supplier ? `${product.brand} · ` : ""}Estoque: {product.stock} {product.unit}</small></div></button>)}</div>{filtered.length > limit && <div className="load-more"><Button variant="outline" onClick={() => setLimit((value) => value + 120)}>Mostrar mais produtos ({(filtered.length - limit).toLocaleString("pt-BR")})</Button></div>}</section>;
+  return <section className="content"><div className="page-heading"><div><span className="eyebrow">CATÁLOGO MESTRE</span><h1>Produtos</h1><p>Base unificada, sem duplicidades e pronta para receber novas planilhas.</p></div><div className="heading-actions"><Button variant="outline" onClick={onCreate}><Plus size={17}/> Novo produto</Button><Button onClick={onImport}><Upload size={17} /> Importar planilha</Button></div></div><div className="products-toolbar"><div className="inline-search"><Search size={17} /><Input value={term} onChange={(e) => { setTerm(e.target.value); setLimit(120); }} placeholder="Pesquisar produto, código, marca ou fornecedor..." /></div><div className="select-wrap"><select value={supplierFilter} onChange={(e) => { setSupplierFilter(e.target.value); setLimit(120); }}><option>Todos</option>{suppliers.map((name) => <option key={name}>{name}</option>)}</select><ChevronDown size={14} /></div><Badge variant="secondary">{filtered.length.toLocaleString("pt-BR")} produtos</Badge></div><div className="product-grid">{filtered.slice(0, limit).map((product) => <div key={product.id} className="product-card flex items-start justify-between gap-2 p-3"><div className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer" onClick={() => onEdit(product, "dados")}><div className="card-image">{product.image ? <img src={product.image} alt="" /> : <PackagePlus />}</div><div className="flex-1 min-w-0"><span>{product.supplier} · {product.code || product.category}</span><strong>{product.description}</strong><small>{product.brand !== product.supplier ? `${product.brand} · ` : ""}Estoque: {product.stock} {product.unit}</small></div></div><button type="button" className="p-2 text-[#9c8e90] hover:text-[#790a0e] hover:bg-[#f6e8ea] rounded-lg transition shrink-0" title="Ver código de barras / QR Code deste produto" onClick={(e) => { e.stopPropagation(); onEdit(product, "codigo"); }}><Barcode size={18} /></button></div>)}</div>{filtered.length > limit && <div className="load-more"><Button variant="outline" onClick={() => setLimit((value) => value + 120)}>Mostrar mais produtos ({(filtered.length - limit).toLocaleString("pt-BR")})</Button></div>}</section>;
 }
 
-function ProductEditor({ product, onSave }: { product: Product; onSave: (product: Product) => void }) {
+function ProductEditor({ product, initialTab = "dados", onSave }: { product: Product; initialTab?: "dados" | "codigo"; onSave: (product: Product) => void }) {
+  const [tab, setTab] = useState<"dados" | "codigo">(initialTab);
   const [draft, setDraft] = useState(product);
-  function loadImage(file?: File) { if (!file) return; if(file.size > 1_000_000) return void toast.error("A imagem deve ter no máximo 1 MB."); const reader = new FileReader(); reader.onload = () => setDraft((d) => ({ ...d, image: String(reader.result) })); reader.readAsDataURL(file); }
-  return <div className="editor-form"><div className="editor-image">{draft.image ? <img src={draft.image} alt="" /> : <PackagePlus />}<label>Trocar imagem<input type="file" accept="image/*" onChange={(e) => loadImage(e.target.files?.[0])} /></label></div><label>Descrição<Input required value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} /></label><div className="form-row"><label>Código<Input value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value })} /></label><label>NCM<Input value={draft.ncm || ""} onChange={(e) => setDraft({ ...draft, ncm: e.target.value })} /></label></div><div className="form-row"><label>Fornecedor<Input value={draft.supplier} onChange={(e) => setDraft({ ...draft, supplier: e.target.value })} /></label><label>Marca<Input value={draft.brand} onChange={(e) => setDraft({ ...draft, brand: e.target.value })} /></label></div><div className="form-row"><label>Categoria<Input value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} /></label><label>Unidade<Input value={draft.unit} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} /></label></div><div className="form-row"><label>Estoque<Input type="number" min="0" step="any" value={draft.stock} onChange={(e) => setDraft({ ...draft, stock: Number(e.target.value) })} /></label><label>Custo<Input type="number" min="0" step="0.01" value={draft.cost ?? ""} onChange={(e) => setDraft({ ...draft, cost: e.target.value === "" ? null : Number(e.target.value) })} /></label></div><div className="form-row"><label>Preço de venda<Input type="number" min="0" step="0.01" value={draft.price ?? ""} onChange={(e) => setDraft({ ...draft, price: e.target.value === "" ? null : Number(e.target.value) })} /></label></div><Button onClick={() => onSave(draft)}>Salvar produto</Button></div>;
+
+  function loadImage(file?: File) {
+    if (!file) return;
+    if (file.size > 1_000_000) return void toast.error("A imagem deve ter no máximo 1 MB.");
+    const reader = new FileReader();
+    reader.onload = () => setDraft((d) => ({ ...d, image: String(reader.result) }));
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex border-b border-[#ede5e6]">
+        <button
+          type="button"
+          onClick={() => setTab("dados")}
+          className={`pb-2.5 px-4 text-xs font-bold border-b-2 transition ${
+            tab === "dados"
+              ? "border-[#790a0e] text-[#790a0e]"
+              : "border-transparent text-[#7a6c6e] hover:text-[#211718]"
+          }`}
+        >
+          Dados cadastrais
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("codigo")}
+          className={`pb-2.5 px-4 text-xs font-bold border-b-2 flex items-center gap-1.5 transition ${
+            tab === "codigo"
+              ? "border-[#790a0e] text-[#790a0e]"
+              : "border-transparent text-[#7a6c6e] hover:text-[#211718]"
+          }`}
+        >
+          <Barcode className="h-4 w-4" />
+          Código de barras & QR Code (Inventário)
+        </button>
+      </div>
+
+      {tab === "dados" ? (
+        <div className="editor-form">
+          <div className="editor-image">
+            {draft.image ? <img src={draft.image} alt="" /> : <PackagePlus />}
+            <label>
+              Trocar imagem
+              <input type="file" accept="image/*" onChange={(e) => loadImage(e.target.files?.[0])} />
+            </label>
+          </div>
+          <label>
+            Descrição
+            <Input required value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+          </label>
+          <div className="form-row">
+            <label>
+              Código do produto (SKU)
+              <Input value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value })} />
+            </label>
+            <label>
+              NCM
+              <Input value={draft.ncm || ""} onChange={(e) => setDraft({ ...draft, ncm: e.target.value })} />
+            </label>
+          </div>
+
+          <div className="rounded-lg border border-[#ede5e6] bg-[#faf7f7] p-2.5 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Barcode className="h-4 w-4 text-[#790a0e]" />
+              <div>
+                <strong className="text-xs text-[#211718] block">Leitura ótica para coletores e inventário</strong>
+                <span className="text-[11px] text-[#7a6c6e] block">
+                  Código ativo: <span className="font-mono font-semibold text-[#790a0e]">{draft.barcode || draft.code || draft.id}</span>
+                </span>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setTab("codigo")}
+              className="text-xs h-7 border-[#ded3d5] text-[#790a0e] hover:bg-[#fdf5f5]"
+            >
+              Gerar / Ver etiqueta
+            </Button>
+          </div>
+
+          <div className="form-row">
+            <label>
+              Fornecedor
+              <Input value={draft.supplier} onChange={(e) => setDraft({ ...draft, supplier: e.target.value })} />
+            </label>
+            <label>
+              Marca
+              <Input value={draft.brand} onChange={(e) => setDraft({ ...draft, brand: e.target.value })} />
+            </label>
+          </div>
+          <div className="form-row">
+            <label>
+              Categoria
+              <Input value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} />
+            </label>
+            <label>
+              Unidade
+              <Input value={draft.unit} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} />
+            </label>
+          </div>
+          <div className="form-row">
+            <label>
+              Estoque
+              <Input type="number" min="0" step="any" value={draft.stock} onChange={(e) => setDraft({ ...draft, stock: Number(e.target.value) })} />
+            </label>
+            <label>
+              Custo
+              <Input type="number" min="0" step="0.01" value={draft.cost ?? ""} onChange={(e) => setDraft({ ...draft, cost: e.target.value === "" ? null : Number(e.target.value) })} />
+            </label>
+          </div>
+          <div className="form-row">
+            <label>
+              Preço de venda
+              <Input type="number" min="0" step="0.01" value={draft.price ?? ""} onChange={(e) => setDraft({ ...draft, price: e.target.value === "" ? null : Number(e.target.value) })} />
+            </label>
+          </div>
+          <Button onClick={() => onSave(draft)}>Salvar alterações</Button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <ProductBarcode
+            product={draft}
+            onUpdateCode={(code) => {
+              setDraft((d) => ({ ...d, barcode: code, code: d.code || code }));
+            }}
+          />
+          <div className="flex justify-between items-center pt-2 border-t border-[#ede5e6]">
+            <Button type="button" variant="outline" size="sm" onClick={() => setTab("dados")}>
+              Voltar aos dados do produto
+            </Button>
+            <Button size="sm" onClick={() => onSave(draft)}>
+              Salvar produto
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

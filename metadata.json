@@ -1,0 +1,7 @@
+{
+  "name": "CDM | Sistema Oficial Casa das Mangueiras",
+  "description": "Sistema oficial CDM para pedidos, produtos, estoque e gestão da Casa das Mangueiras.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
