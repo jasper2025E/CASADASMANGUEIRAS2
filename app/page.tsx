@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { Archive, Boxes, Check, ChevronDown, ClipboardCheck, ClipboardList, Download, Eye, FileDown, FileSpreadsheet, LayoutDashboard, Menu, Minus, PackagePlus, Plus, Printer, RotateCcw, Search, Settings, ShoppingCart, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
 import { jsPDF } from "jspdf";
 import productsSeed from "@/lib/products.json";
@@ -71,6 +72,7 @@ export default function Home() {
   const [authLoading, setAuthLoading] = useState(true);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [cloudStatus, setCloudStatus] = useState("Conectando ao banco...");
+  const [syncAttempt, setSyncAttempt] = useState(0);
   const [savingOrder, setSavingOrder] = useState(false);
 
   useEffect(() => {
@@ -83,9 +85,10 @@ export default function Home() {
     if (!user) return;
     let cancelled = false;
     async function connectCloud() {
+      setOrganizationId(null);
       setCloudStatus("Sincronizando dados...");
       const { data: memberships, error: membershipError } = await supabase.from("organization_members").select("organization_id").eq("user_id", user!.id);
-      if (membershipError) { setCloudStatus("Falha na sincronização"); return; }
+      if (membershipError) { console.error("Falha ao carregar organizações", membershipError); setCloudStatus("Falha na sincronização"); return; }
       const preferredId = localStorage.getItem("central-active-organization");
       let orgId = memberships?.find((item) => item.organization_id === preferredId)?.organization_id || memberships?.[0]?.organization_id as string | undefined;
       if (!orgId) {
@@ -137,7 +140,7 @@ export default function Home() {
       }
     }
     void connectCloud(); return () => { cancelled = true; };
-  }, [user]);
+  }, [user, syncAttempt]);
 
   useEffect(() => {
     void loadCatalog().then((catalog) => { if (catalog?.length) setProducts(catalog); });
@@ -301,12 +304,12 @@ export default function Home() {
   return <div className="app-shell">
     <Toaster richColors position="top-right" />
     <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
-      <div className="brand"><div className="brand-mark"><ClipboardList size={22} /></div><div><strong>Central Pedido</strong><span>Casa das Mangueiras</span></div><button className="mobile-close" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X /></button></div>
+      <div className="brand"><div className="brand-mark"><Image src="/brand/casa-das-mangueiras-logo.webp" width={40} height={40} priority alt="Casa das Mangueiras" /></div><div><strong>Central Pedido</strong><span>Casa das Mangueiras</span></div><button className="mobile-close" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X /></button></div>
       <nav><p className="nav-label">OPERAÇÃO</p>{navItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => { setView(item.id); setSidebarOpen(false); }}><Icon size={19} /><span>{item.label}</span>{item.id === "order" && selectedItems.length > 0 && <b>{selectedItems.length}</b>}</button>; })}</nav>
-      <div className="sidebar-foot"><div className="user-card"><div className="avatar">{(user.email?.[0] || "C").toUpperCase()}</div><div><strong>{user.email?.split("@")[0] || "Equipe de compras"}</strong><span>Dados sincronizados</span></div></div></div>
+      <div className="sidebar-foot"><div className="user-card"><div className="avatar">{(user.email?.[0] || "C").toUpperCase()}</div><div><strong>{user.email?.split("@")[0] || "Equipe de compras"}</strong><span>{cloudStatus}</span></div></div></div>
     </aside>
     {sidebarOpen && <button className="backdrop" aria-label="Fechar menu" onClick={() => setSidebarOpen(false)} />}
-    <main className="main-area"><header className="topbar"><button className="menu-button" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu"><Menu /></button><div className="topbar-search"><Search size={18} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar produto, código ou medida..." /></div><div className="topbar-actions"><span className="sync-dot" /> {cloudStatus}<button className="logout-button" onClick={() => supabase.auth.signOut()}>Sair</button></div></header>
+    <main className="main-area"><header className="topbar"><button className="menu-button" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu"><Menu /></button><div className="topbar-search"><Search size={18} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar produto, código ou medida..." /></div><div className="topbar-actions"><span className={`sync-dot ${cloudStatus.startsWith("Falha") ? "sync-error" : cloudStatus === "Dados sincronizados" ? "sync-ok" : "sync-loading"}`} /> {cloudStatus}<button className="logout-button" onClick={() => supabase.auth.signOut()}>Sair</button></div></header>
       {view === "order" && <section className="content order-content">
         <div className="page-heading"><div><span className="eyebrow">COMPRAS</span><h1>Novo pedido</h1><p>Selecione o fornecedor, confira o estoque e informe o que precisa comprar.</p></div><div className="heading-actions"><Button variant="outline" disabled={savingOrder} onClick={() => saveOrder("Rascunho")}>Salvar rascunho</Button><Button disabled={savingOrder} onClick={() => saveOrder("Finalizado")}><Check size={17} /> {savingOrder ? "Salvando..." : "Finalizar pedido"}</Button></div></div>
         <div className="supplier-selector"><div><span>Fornecedor do pedido</span><strong>{suppliers.length.toLocaleString("pt-BR")} fornecedores cadastrados</strong></div><div className="select-wrap supplier-select"><Boxes size={17} /><select value={supplier} onChange={(e) => { setSupplier(e.target.value); setCategory("Todas"); }}>{suppliers.map((name) => <option key={name}>{name}</option>)}</select><ChevronDown size={15} /></div><Badge variant="secondary">{products.filter((p) => p.supplier === supplier).length.toLocaleString("pt-BR")} produtos</Badge></div>
@@ -319,7 +322,7 @@ export default function Home() {
       {view === "history" && <History orders={orders} onRemove={removeOrder} onRepeat={repeatOrder} />}
       {view === "products" && <Products products={products} onEdit={(product) => { setCreatingProduct(false); setProductModal(product); }} onCreate={createProduct} onImport={() => setImportOpen(true)} />}
       {view === "balance" && <BalanceModule products={products} organizationId={organizationId} userId={user.id} />}
-      {view === "settings" && organizationId && <SettingsModule user={user} organizationId={organizationId} onOrganizationChange={() => window.location.reload()} />}
+      {view === "settings" && (organizationId ? <SettingsModule user={user} organizationId={organizationId} onOrganizationChange={() => window.location.reload()} /> : <section className="content settings-unavailable"><div className="panel"><Settings size={30}/><div><span className="eyebrow">CONFIGURAÇÕES</span><h1>{cloudStatus.startsWith("Falha") ? "Não foi possível carregar agora" : "Preparando sua organização"}</h1><p>{cloudStatus.startsWith("Falha") ? "A conexão foi interrompida. Tente novamente; seus dados locais continuam preservados." : "Estamos conectando sua conta e preparando os dados da empresa."}</p></div><Button onClick={() => setSyncAttempt((attempt) => attempt + 1)} disabled={!cloudStatus.startsWith("Falha")}><RotateCcw size={16}/> Tentar novamente</Button></div></section>)}
     </main>
     <Dialog open={!!productModal} onOpenChange={(open) => { if (!open) { setProductModal(null); setCreatingProduct(false); } }}><DialogContent className="sm:max-w-[620px]"><DialogHeader><DialogTitle>{creatingProduct ? "Cadastrar produto" : "Editar produto"}</DialogTitle></DialogHeader>{productModal && <ProductEditor product={productModal} onSave={saveProduct} />}</DialogContent></Dialog>
     <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) setImportPreview(null); }}><DialogContent className="sm:max-w-[600px]"><DialogHeader><DialogTitle>Importar novos produtos</DialogTitle></DialogHeader><div className="import-box"><label className="file-drop"><FileSpreadsheet size={30} /><strong>{importing ? "Analisando a planilha..." : "Selecionar planilha de produtos"}</strong><span>XLSX, XLS ou CSV · os produtos repetidos serão ignorados</span><input type="file" accept=".xlsx,.xls,.csv" disabled={importing} onChange={(e) => inspectImport(e.target.files?.[0])} /></label>{importPreview && <div className="import-result"><div><span>Arquivo</span><strong>{importPreview.fileName}</strong></div><div className="import-metrics"><article><strong>{importPreview.rows.toLocaleString("pt-BR")}</strong><span>linhas lidas</span></article><article className="success"><strong>{importPreview.products.length.toLocaleString("pt-BR")}</strong><span>produtos novos</span></article><article><strong>{importPreview.duplicates.toLocaleString("pt-BR")}</strong><span>duplicados ignorados</span></article><article><strong>{importPreview.invalid.toLocaleString("pt-BR")}</strong><span>linhas inválidas</span></article></div><p>A comparação usa o código do produto. Sem código, utiliza descrição e fornecedor.</p><Button className="w-full" disabled={!importPreview.products.length} onClick={confirmImport}><Upload size={17} /> Confirmar importação</Button></div>}</div></DialogContent></Dialog>

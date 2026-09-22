@@ -5,8 +5,9 @@ export const metadata: Metadata = {
   title: "Central Pedido | Casa das Mangueiras",
   description: "Sistema de pedidos por fornecedor com catálogo, histórico e exportação em PDF e XLSX.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/brand/casa-das-mangueiras-logo.webp",
+    shortcut: "/brand/casa-das-mangueiras-logo.webp",
+    apple: "/brand/casa-das-mangueiras-logo.webp",
   },
 };
 
