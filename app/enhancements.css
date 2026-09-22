@@ -16,38 +16,59 @@
 
 /* Identidade Casa das Mangueiras */
 :root {
-  --primary: #8f171d;
+  --cdm-red: #790a0e;
+  --cdm-red-dark: #590607;
+  --cdm-black: #1a0303;
+  --cdm-graphite: #211718;
+  --cdm-silver: #a39f9f;
+  --cdm-silver-light: #e8e8e8;
+  --cdm-white: #fff;
+  --primary: var(--cdm-red);
   --primary-foreground: #fff;
-  --secondary-foreground: #5f1216;
+  --secondary-foreground: var(--cdm-red-dark);
   --accent: #f8eded;
-  --accent-foreground: #751319;
-  --ring: #a6262d;
+  --accent-foreground: var(--cdm-red);
+  --ring: #944c4c;
 }
 
-.sidebar { background:#181315; border-right-color:#432328; }
-.brand { border-bottom-color:#432328; }
-.brand-mark { overflow:hidden; background:#080707; border:1px solid #633038; }
+.app-shell,html,body { background:#f5f3f3; color:var(--cdm-graphite); }
+.sidebar { background:linear-gradient(180deg,var(--cdm-black),#260708); border-right-color:#4b171a; }
+.brand { border-bottom-color:#4b171a; }
+.brand-mark { overflow:hidden; background:#080707; border:1px solid #6d292d; }
 .brand-mark img { width:100%; height:100%; object-fit:cover; }
-.brand span,.user-card span { color:#c6a8ab; }
-.nav-label { color:#a97c80; }
+.brand strong { font-size:20px; letter-spacing:.08em; }
+.brand span,.user-card span { color:#c6b2b2; }
+.nav-label { color:#b78d90; }
 .sidebar nav button,.sidebar-foot>button { color:#ddcfd0; }
-.sidebar nav button:hover,.sidebar-foot>button:hover { background:#351c20; }
-.sidebar nav button.active { color:#7e151b; background:#fff; box-shadow:inset 3px 0 #a51f27; }
-.sidebar nav button b,.avatar { background:#a51f27; }
-.sidebar-foot,.user-card { border-color:#432328; }
-.eyebrow,.auth-copy>span { color:#a51f27; }
-.product-row.has-quantity { box-shadow:inset 3px 0 #a51f27; }
-.auth-page { background:radial-gradient(circle at 20% 20%,#68151b 0,transparent 36%),linear-gradient(135deg,#100c0d,#2b1215 62%,#68151b); }
-.auth-card { border-top:4px solid #a51f27; box-shadow:0 24px 70px #09040580; }
+.sidebar nav button:hover,.sidebar-foot>button:hover { background:#3b1013; }
+.sidebar nav button.active { color:var(--cdm-red-dark); background:#fff; box-shadow:inset 4px 0 var(--cdm-red); }
+.sidebar nav button b,.avatar { background:var(--cdm-red); }
+.sidebar-foot,.user-card { border-color:#4b171a; }
+.eyebrow,.auth-copy>span { color:var(--cdm-red); }
+.page-heading h1,.catalog-toolbar h2,.summary-title h2,.panel h2,.product-main strong,.product-card strong,.order-detail-list strong { color:var(--cdm-graphite); }
+.product-row.has-quantity { background:#fbf5f5; box-shadow:inset 3px 0 var(--cdm-red); }
+.product-meta { color:var(--cdm-red)!important; }
+.supplier-tabs button.selected,.filters>button.filter-active { border-color:var(--cdm-red); color:var(--cdm-red); box-shadow:0 0 0 1px var(--cdm-red); background:#fbf3f3; }
+.summary-total strong,.metric-grid strong,.balance-tabs button.active,.settings-title,.sector-icon,.row-actions button { color:var(--cdm-red-dark); }
+.editor-image label { background:var(--cdm-red); }
+.export-grid button:hover,.product-card:hover { border-color:#944c4c; color:var(--cdm-red); background:#fbf5f5; }
+.member-avatar,.sector-icon,.row-actions button { background:#f5e9ea; }
+.organization-list button.active { border-color:#944c4c; background:#fbf3f3; }
+.topbar { border-bottom-color:#ddd7d7; }
+.topbar-search { background:#f7f5f5; border-color:#ddd7d7; }
+.catalog-card,.order-summary,.panel,.metric-grid>div,.product-card,.supplier-selector { border-color:#ddd7d7; box-shadow:0 3px 12px #1a030308; }
+.auth-page { background:radial-gradient(circle at 20% 20%,#790a0e 0,transparent 36%),linear-gradient(135deg,var(--cdm-black),#31090c 62%,var(--cdm-red-dark)); }
+.auth-card { border-top:4px solid var(--cdm-red); box-shadow:0 24px 70px #09040580; }
 .auth-brand { margin-bottom:24px; }
 .auth-logo { width:170px; height:170px; object-fit:cover; border-radius:15px; margin-bottom:13px; box-shadow:0 9px 25px #2b111736; }
-.auth-brand strong { color:#671218; font-size:20px; }
-.auth-switch { color:#86171e; }
+.auth-brand strong { color:var(--cdm-red-dark); font-size:25px; letter-spacing:.12em; }
+.auth-brand span { color:#665d5e; }
+.auth-switch { color:var(--cdm-red); }
 .sync-dot.sync-error { background:#d43d44; box-shadow:0 0 0 3px #fde9ea; }
 .sync-dot.sync-loading { background:#d19a20; box-shadow:0 0 0 3px #fff3d9; }
 .sync-dot.sync-ok { background:#22a663; box-shadow:0 0 0 3px #e3f6ec; }
 .settings-unavailable .panel { min-height:320px; display:flex; align-items:center; justify-content:center; flex-direction:column; text-align:center; gap:18px; }
-.settings-unavailable .panel>svg { color:#a51f27; }
+.settings-unavailable .panel>svg { color:var(--cdm-red); }
 .settings-unavailable h1 { margin:5px 0 8px; font-size:26px; color:#2c2021; }
 .settings-unavailable p { margin:0; max-width:520px; color:#71808d; font-size:14px; }
 

@@ -207,7 +207,7 @@ export default function Home() {
   }
   function exportPdf() {
     if (!selectedItems.length) return void toast.error("Não há itens para exportar.");
-    const doc = new jsPDF({ orientation: "landscape" }); doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.text("Pedido de compra", 14, 16); doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(`Emitido em ${new Date().toLocaleString("pt-BR")}`, 14, 22);
+    const doc = new jsPDF({ orientation: "landscape" }); doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.text("CDM — Pedido de compra", 14, 16); doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(`Casa das Mangueiras · Emitido em ${new Date().toLocaleString("pt-BR")}`, 14, 22);
     let y = 31; doc.setFillColor(20, 46, 74); doc.rect(14, y - 5, 269, 8, "F"); doc.setTextColor(255, 255, 255); doc.text("FORNECEDOR", 16, y); doc.text("CÓDIGO", 52, y); doc.text("PRODUTO", 82, y); doc.text("ESTOQUE", 232, y); doc.text("PEDIDO", 258, y); y += 8; doc.setTextColor(30, 41, 59);
     selectedItems.forEach((i, index) => { if (y > 190) { doc.addPage(); y = 16; } if (index % 2 === 0) { doc.setFillColor(244, 247, 250); doc.rect(14, y - 5, 269, 8, "F"); } doc.text(i.supplier.slice(0, 18), 16, y); doc.text((i.code || "—").slice(0, 15), 52, y); doc.text(i.description.slice(0, 72), 82, y); doc.text(`${i.stock} ${i.unit}`, 232, y); doc.setFont("helvetica", "bold"); doc.text(`${i.quantity} ${i.unit}`, 258, y); doc.setFont("helvetica", "normal"); y += 8; });
     doc.save(`pedido-${new Date().toISOString().slice(0, 10)}.pdf`); toast.success("PDF baixado.");
@@ -304,7 +304,7 @@ export default function Home() {
   return <div className="app-shell">
     <Toaster richColors position="top-right" />
     <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
-      <div className="brand"><div className="brand-mark"><Image src="/brand/casa-das-mangueiras-logo.webp" width={40} height={40} priority alt="Casa das Mangueiras" /></div><div><strong>Central Pedido</strong><span>Casa das Mangueiras</span></div><button className="mobile-close" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X /></button></div>
+      <div className="brand"><div className="brand-mark"><Image src="/brand/casa-das-mangueiras-logo.webp" width={40} height={40} priority alt="Casa das Mangueiras" /></div><div><strong>CDM</strong><span>Casa das Mangueiras</span></div><button className="mobile-close" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X /></button></div>
       <nav><p className="nav-label">OPERAÇÃO</p>{navItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => { setView(item.id); setSidebarOpen(false); }}><Icon size={19} /><span>{item.label}</span>{item.id === "order" && selectedItems.length > 0 && <b>{selectedItems.length}</b>}</button>; })}</nav>
       <div className="sidebar-foot"><div className="user-card"><div className="avatar">{(user.email?.[0] || "C").toUpperCase()}</div><div><strong>{user.email?.split("@")[0] || "Equipe de compras"}</strong><span>{cloudStatus}</span></div></div></div>
     </aside>
