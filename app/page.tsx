@@ -441,6 +441,9 @@ export default function Home() {
           orders={orders}
           suppliers={suppliers}
           cloudStatus={cloudStatus}
+          access={access}
+          onUpdateOrderStage={updateOrderStage}
+          onRefreshOrders={() => setSyncAttempt((a) => a + 1)}
           onNavigate={(newView, subTab) => {
             setView(newView);
             if (subTab) setOrderTab(subTab);

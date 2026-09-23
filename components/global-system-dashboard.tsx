@@ -26,15 +26,21 @@ import {
   FULFILLMENT_STAGES,
 } from "@/components/order-progress";
 
+import { KanbanModule } from "@/components/kanban-module";
+import { type UserAccess } from "@/lib/access";
+
 interface GlobalSystemDashboardProps {
   products: Product[];
   orders: Order[];
   suppliers: string[];
   cloudStatus: string;
+  access: UserAccess | null;
   onNavigate: (view: string, subTab?: "compose" | "history" | "analytics") => void;
   onSelectSupplierForOrder: (supplier: string) => void;
   onCreateProduct: () => void;
   onImport: () => void;
+  onUpdateOrderStage: (orderId: string, stage: FulfillmentStage, message?: string) => void;
+  onRefreshOrders: () => void; // ADDED
 }
 
 const supplierColors: Record<string, string> = {
@@ -50,10 +56,13 @@ export function GlobalSystemDashboard({
   orders,
   suppliers,
   cloudStatus,
+  access,
   onNavigate,
   onSelectSupplierForOrder,
   onCreateProduct,
   onImport,
+  onUpdateOrderStage,
+  onRefreshOrders,
 }: GlobalSystemDashboardProps) {
   // 1. Stock Valuation & Metrics
   const stats = useMemo(() => {
@@ -356,6 +365,12 @@ export function GlobalSystemDashboard({
       </div>
 
       {/* Main Grid: Analytical Breakdown Cards */}
+      {(access?.role === "ADMIN_CD" || access?.role === "SUPER_ADMIN") && (
+        <section className="panel bg-white border border-[#e5dcdd] rounded-xl p-5 shadow-xs mb-6">
+          <h2 className="text-base font-bold text-[#211718] mb-4">Painel Kanban (ADMIN CD)</h2>
+          <KanbanModule orders={orders} onRefresh={onRefreshOrders} />
+        </section>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
         {/* Panel 1: Presença e Valoração por Fornecedor */}
         <div className="panel bg-white border border-[#e5dcdd] rounded-xl p-5 shadow-xs">
