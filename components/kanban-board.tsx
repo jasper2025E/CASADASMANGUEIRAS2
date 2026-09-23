@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { Order, FulfillmentStage, FULFILLMENT_STAGES, normalizeFulfillmentStage } from "@/components/order-progress";
+import { type Order, type FulfillmentStage } from "@/app/page";
+import { normalizeFulfillmentStage, FULFILLMENT_STAGES } from "@/components/order-progress";
 import { Button } from "@/components/ui/button";
 import { ClipboardCheck, PackageCheck, Truck, CheckCircle2, XCircle } from "lucide-react";
 

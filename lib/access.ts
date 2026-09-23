@@ -25,7 +25,7 @@ export const permissionGroups = [
 ] as const;
 
 export type PermissionKey = typeof permissionGroups[number]["items"][number]["key"];
-export type MemberRole = "support" | "admin" | "director" | "manager" | "checker" | "inspector" | "sales" | "viewer";
+export type MemberRole = "support" | "admin" | "director" | "manager" | "checker" | "inspector" | "sales" | "viewer" | "ADMIN_CD" | "SUPER_ADMIN";
 
 export const roleLabels: Record<MemberRole, string> = {
   support: "Suporte",
@@ -36,6 +36,8 @@ export const roleLabels: Record<MemberRole, string> = {
   inspector: "Fiscal",
   sales: "Vendas",
   viewer: "Consulta",
+  ADMIN_CD: "Admin CD",
+  SUPER_ADMIN: "Super Admin",
 };
 
 export const assignableRoles: MemberRole[] = ["admin", "director", "manager", "checker", "inspector", "sales", "viewer"];
@@ -49,6 +51,8 @@ export const rolePresets: Record<MemberRole, PermissionKey[]> = {
   inspector: ["dashboard.view","orders.view","products.view","inventory.view","inventory.count","inventory.manage"],
   sales: ["dashboard.view","orders.view","orders.create","orders.export","products.view"],
   viewer: ["dashboard.view","orders.view","products.view","inventory.view"],
+  ADMIN_CD: permissionGroups.flatMap((group) => group.items.map((item) => item.key)),
+  SUPER_ADMIN: permissionGroups.flatMap((group) => group.items.map((item) => item.key)),
 };
 
 export type UserAccess = { role: MemberRole; permissions: string[]; active: boolean };

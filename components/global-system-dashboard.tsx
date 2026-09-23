@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { Product, Order } from "@/app/page";
 import {
+  type FulfillmentStage,
   normalizeFulfillmentStage,
   FULFILLMENT_STAGES,
 } from "@/components/order-progress";
