@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo, useCallback } from "react";
+import { List } from "react-window";
+import { AutoSizer } from "react-virtualized-auto-sizer";
 import Image from "next/image";
 import {
   ShoppingCart,
@@ -113,10 +115,25 @@ export function OrdersModule({
 }: OrdersModuleProps) {
   const [selectedOrderForModal, setSelectedOrderForModal] = useState<Order | null>(null);
 
+  const handleSetOrderTab = React.useCallback(setOrderTab, [setOrderTab]);
+  const handleSetSupplier = React.useCallback(setSupplier, [setSupplier]);
+  const handleSetCategory = React.useCallback(setCategory, [setCategory]);
+  const handleSetQuantity = React.useCallback(setQuantity, [setQuantity]);
+  const handleSetOnlySelected = React.useCallback(setOnlySelected, [setOnlySelected]);
+  const handleSaveOrder = React.useCallback(saveOrder, [saveOrder]);
+  const handleExportPdf = React.useCallback(exportPdf, [exportPdf]);
+  const handleExportXlsx = React.useCallback(exportXlsx, [exportXlsx]);
+  const handleSetProductModal = React.useCallback(setProductModal, [setProductModal]);
+  const handleSetProductModalTab = React.useCallback(setProductModalTab, [setProductModalTab]);
+  const handleRemoveOrder = React.useCallback(removeOrder, [removeOrder]);
+  const handleRepeatOrder = React.useCallback(repeatOrder, [repeatOrder]);
+  const handleUpdateOrderStage = React.useCallback(updateOrderStage, [updateOrderStage]);
+  const handleSetSelectedOrderForModal = React.useCallback(setSelectedOrderForModal, [setSelectedOrderForModal]);
+
   // Keep selected modal order synced if stage changes
-  const activeModalOrder = selectedOrderForModal
+  const activeModalOrder = useMemo(() => selectedOrderForModal
     ? orders.find((o) => o.id === selectedOrderForModal.id) || selectedOrderForModal
-    : null;
+    : null, [selectedOrderForModal, orders]);
 
   return (
     <section className="content order-content">
@@ -128,7 +145,7 @@ export function OrdersModule({
               ? "bg-white text-[#790a0e] shadow-xs"
               : "text-[#5c4e50] hover:text-[#211718]"
           }`}
-          onClick={() => setOrderTab("compose")}
+          onClick={() => handleSetOrderTab("compose")}
         >
           <ShoppingCart size={15} />
           <span>1. Montar Pedido</span>
@@ -145,7 +162,7 @@ export function OrdersModule({
               ? "bg-white text-[#790a0e] shadow-xs"
               : "text-[#5c4e50] hover:text-[#211718]"
           }`}
-          onClick={() => setOrderTab("history")}
+          onClick={() => handleSetOrderTab("history")}
         >
           <Clock size={15} />
           <span>2. Histórico & Atendimento</span>
@@ -162,7 +179,7 @@ export function OrdersModule({
               ? "bg-white text-[#790a0e] shadow-xs"
               : "text-[#5c4e50] hover:text-[#211718]"
           }`}
-          onClick={() => setOrderTab("analytics")}
+          onClick={() => handleSetOrderTab("analytics")}
         >
           <BarChart3 size={15} />
           <span>3. Painel de Pedidos</span>
@@ -182,13 +199,13 @@ export function OrdersModule({
               <Button
                 variant="outline"
                 disabled={savingOrder}
-                onClick={() => saveOrder("Rascunho")}
+                onClick={() => handleSaveOrder("Rascunho")}
               >
                 Salvar rascunho
               </Button>
               <Button
                 disabled={savingOrder}
-                onClick={() => saveOrder("Finalizado")}
+                onClick={() => handleSaveOrder("Finalizado")}
               >
                 <Check size={17} /> {savingOrder ? "Enviando..." : "Enviar ao CD"}
               </Button>
@@ -205,8 +222,8 @@ export function OrdersModule({
               <select
                 value={supplier}
                 onChange={(e) => {
-                  setSupplier(e.target.value);
-                  setCategory("Todas");
+                  handleSetSupplier(e.target.value);
+                  handleSetCategory("Todas");
                 }}
               >
                 <option>Todos</option>{suppliers.map((name) => (
@@ -232,7 +249,7 @@ export function OrdersModule({
                     <SlidersHorizontal size={16} />
                     <select
                       value={category}
-                      onChange={(e) => setCategory(e.target.value)}
+                      onChange={(e) => handleSetCategory(e.target.value)}
                     >
                       {categories.map((name) => (
                         <option key={name}>{name}</option>
@@ -242,7 +259,7 @@ export function OrdersModule({
                   </div>
                   <button
                     className={onlySelected ? "filter-active" : ""}
-                    onClick={() => setOnlySelected((v) => !v)}
+                    onClick={() => handleSetOnlySelected((v) => !v)}
                   >
                     Somente adicionados
                   </button>
@@ -255,93 +272,106 @@ export function OrdersModule({
                 <span>Quantidade do pedido</span>
               </div>
 
-              <div className="product-list">
-                {filtered.map((product) => {
-                  const quantity = quantities[product.id] || 0;
-                  return (
-                    <article
-                      className={`product-row ${quantity > 0 ? "has-quantity" : ""}`}
-                      key={product.id}
+              <div className="product-list" style={{ height: "600px" }}>
+                <AutoSizer>
+                  {({ height, width }: { height: number; width: number }) => (
+                    <List
+                      height={height}
+                      itemCount={filtered.length}
+                      itemSize={80} // Fixed height per row
+                      width={width}
                     >
-                      <div className="product-main">
-                        <button
-                          className="product-image"
-                          onClick={() => {
-                            setProductModal(product);
-                            setProductModalTab("dados");
-                          }}
-                          aria-label={`Editar ${product.description}`}
-                        >
-                          {product.image ? (
-                            <Image
-                              src={product.image}
-                              alt={product.description}
-                              width={48}
-                              height={48}
-                              className="w-full h-full object-cover rounded"
-                            />
-                          ) : (
-                            <PackagePlus size={25} />
-                          )}
-                        </button>
-                        <div>
-                          <div className="product-meta flex items-center justify-between gap-2">
-                            <span>{product.code || product.category}</span>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setProductModal(product);
-                                setProductModalTab("codigo");
-                              }}
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#f6e8ea] text-[#790a0e] hover:bg-[#eed5d8] border border-[#eed5d8] transition cursor-pointer"
-                              title="Código de barras EAN-13"
-                            >
-                              <Barcode size={12} />
-                              <span>EAN‑13</span>
-                            </button>
-                          </div>
-                          <strong>{product.description}</strong>
-                          <span>
-                            {product.category} · unidade: {product.unit}
-                          </span>
-                        </div>
-                      </div>
+                      {({ index, style }: { index: number; style: React.CSSProperties }) => {
+                        const product = filtered[index];
+                        const quantity = quantities[product.id] || 0;
+                        return (
+                          <article
+                            style={style}
+                            className={`product-row ${quantity > 0 ? "has-quantity" : ""}`}
+                            key={product.id}
+                          >
+                            <div className="product-main">
+                              <button
+                                className="product-image"
+                                onClick={() => {
+                                  handleSetProductModal(product);
+                                  handleSetProductModalTab("dados");
+                                }}
+                                aria-label={`Editar ${product.description}`}
+                              >
+                                {product.image ? (
+                                  <Image
+                                    src={product.image}
+                                    alt={product.description}
+                                    width={48}
+                                    height={48}
+                                    className="w-full h-full object-cover rounded"
+                                  />
+                                ) : (
+                                  <PackagePlus size={25} />
+                                )}
+                              </button>
+                              <div>
+                                <div className="product-meta flex items-center justify-between gap-2">
+                                  <span>{product.code || product.category}</span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSetProductModal(product);
+                                      handleSetProductModalTab("codigo");
+                                    }}
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#f6e8ea] text-[#790a0e] hover:bg-[#eed5d8] border border-[#eed5d8] transition cursor-pointer"
+                                    title="Código de barras EAN-13"
+                                  >
+                                    <Barcode size={12} />
+                                    <span>EAN‑13</span>
+                                  </button>
+                                </div>
+                                <strong>{product.description}</strong>
+                                <span>
+                                  {product.category} · unidade: {product.unit}
+                                </span>
+                              </div>
+                            </div>
 
-                      <div className="stock">
-                        <strong>{product.stock}</strong>
-                        <span>{product.unit}</span>
-                      </div>
+                            <div className="stock">
+                              <strong>{product.stock}</strong>
+                              <span>{product.unit}</span>
+                            </div>
 
-                      <div className="quantity-control">
-                        <button
-                          onClick={() => setQuantity(product.id, quantity - 1)}
-                          disabled={quantity === 0}
-                          aria-label="Diminuir"
-                        >
-                          <Minus size={16} />
-                        </button>
-                        <input
-                          aria-label={`Quantidade de ${product.description}`}
-                          type="number"
-                          min="0"
-                          value={quantity || ""}
-                          placeholder="0"
-                          onChange={(e) =>
-                            setQuantity(product.id, Number(e.target.value))
-                          }
-                        />
-                        <button
-                          onClick={() => setQuantity(product.id, quantity + 1)}
-                          aria-label="Aumentar"
-                        >
-                          <Plus size={16} />
-                        </button>
-                        <span>{product.unit}</span>
-                      </div>
-                    </article>
-                  );
-                })}
+                            <div className="quantity-control">
+                              <button
+                                onClick={() => handleSetQuantity(product.id, quantity - 1)}
+                                disabled={quantity === 0}
+                                aria-label="Diminuir"
+                              >
+                                <Minus size={16} />
+                              </button>
+                              <input
+                                aria-label={`Quantidade de ${product.description}`}
+                                type="number"
+                                min="0"
+                                value={quantity || ""}
+                                placeholder="0"
+                                onChange={(e) =>
+                                  handleSetQuantity(product.id, Number(e.target.value))
+                                }
+                              />
+                              <button
+                                onClick={() => handleSetQuantity(product.id, quantity + 1)}
+                                aria-label="Aumentar"
+                              >
+                                <Plus size={16} />
+                              </button>
+                              <span>{product.unit}</span>
+                            </div>
+                          </article>
+                        );
+                      }}
+                    </List>
+                  )}
+                </AutoSizer>
               </div>
             </div>
 
@@ -737,7 +767,7 @@ export function OrdersModule({
                 <span className="text-xs font-bold text-[#790a0e]">
                   Total:{" "}
                   {activeModalOrder.items
-                    .reduce((sum, i) => sum + i.quantity, 0)
+                    .reduce((sum: number, i: { quantity: number }) => sum + i.quantity, 0)
                     .toLocaleString("pt-BR")}{" "}
                   unidades
                 </span>

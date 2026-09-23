@@ -65,6 +65,14 @@ export function GlobalSystemDashboard({
   onUpdateOrderStage,
   onRefreshOrders,
 }: GlobalSystemDashboardProps) {
+  // Memoized callback for navigations
+  const handleNavigate = React.useCallback(onNavigate, [onNavigate]);
+  const handleSelectSupplier = React.useCallback(onSelectSupplierForOrder, [onSelectSupplierForOrder]);
+  const handleCreateProduct = React.useCallback(onCreateProduct, [onCreateProduct]);
+  const handleImport = React.useCallback(onImport, [onImport]);
+  const handleUpdateOrderStage = React.useCallback(onUpdateOrderStage, [onUpdateOrderStage]);
+  const handleRefreshOrders = React.useCallback(onRefreshOrders, [onRefreshOrders]);
+
   // 1. Stock Valuation & Metrics
   const stats = useMemo(() => {
     let stockCostTotal = 0;
@@ -203,20 +211,20 @@ export function GlobalSystemDashboard({
         <div className="heading-actions flex items-center gap-2 flex-wrap">
           <Button
             variant="outline"
-            onClick={onImport}
+            onClick={handleImport}
             className="flex items-center gap-1.5"
           >
             <FileSpreadsheet size={16} /> Importar catálogo
           </Button>
           <Button
             variant="outline"
-            onClick={onCreateProduct}
+            onClick={handleCreateProduct}
             className="flex items-center gap-1.5"
           >
             <Plus size={16} /> Novo produto
           </Button>
           <Button
-            onClick={() => onNavigate("order", "compose")}
+            onClick={() => handleNavigate("order", "compose")}
             className="flex items-center gap-1.5"
           >
             <ShoppingCart size={16} /> Criar pedido
@@ -369,7 +377,7 @@ export function GlobalSystemDashboard({
       {(access?.role === "ADMIN_CD" || access?.role === "SUPER_ADMIN") && (
         <section className="panel bg-white border border-[#e5dcdd] rounded-xl p-5 shadow-xs mb-6">
           <h2 className="text-base font-bold text-[#211718] mb-4">Painel Kanban (ADMIN CD)</h2>
-          <KanbanModule orders={orders} onRefresh={onRefreshOrders} />
+          <KanbanModule orders={orders} onRefresh={handleRefreshOrders} />
         </section>
       )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
@@ -385,7 +393,7 @@ export function GlobalSystemDashboard({
               </span>
             </div>
             <button
-              onClick={() => onNavigate("order", "analytics")}
+              onClick={() => handleNavigate("order", "analytics")}
               className="text-xs text-[#790a0e] font-semibold hover:underline flex items-center gap-1"
             >
               <span>Ver painel</span>
@@ -410,7 +418,7 @@ export function GlobalSystemDashboard({
                     </strong>
                   </div>
                   <button
-                    onClick={() => onSelectSupplierForOrder(item.name)}
+                    onClick={() => handleSelectSupplier(item.name)}
                     className="text-[11px] text-[#790a0e] hover:underline font-semibold"
                     title={`Montar pedido direto de ${item.name}`}
                   >
@@ -454,7 +462,7 @@ export function GlobalSystemDashboard({
               </span>
             </div>
             <button
-              onClick={() => onNavigate("products")}
+              onClick={() => handleNavigate("products")}
               className="text-xs text-[#790a0e] font-semibold hover:underline flex items-center gap-1"
             >
               <span>Ver catálogo</span>
@@ -583,7 +591,7 @@ export function GlobalSystemDashboard({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => onNavigate("balance")}
+              onClick={() => handleNavigate("balance")}
               className="text-xs flex items-center gap-1"
             >
               <ClipboardCheck size={14} /> Balanço físico

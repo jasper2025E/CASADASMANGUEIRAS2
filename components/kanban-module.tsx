@@ -15,6 +15,7 @@ interface KanbanModuleProps {
 
 const COLUMNS = [
   { key: "submitted", label: "Pendentes", icon: ClipboardCheck },
+  { key: "received", label: "Recebidos (CD)", icon: ClipboardCheck },
   { key: "separating", label: "Em Separação", icon: PackageCheck },
   { key: "shipped", label: "Em Trânsito", icon: Truck },
   { key: "delivered", label: "Finalizado", icon: CheckCircle2 },
@@ -60,10 +61,16 @@ export function KanbanModule({ orders, onRefresh }: KanbanModuleProps) {
                 
                 <div className="flex flex-wrap gap-2">
                   {col.key === "submitted" && (
-                    <>
+                    <Button size="sm" onClick={() => transitionOrder(order.dbId!, "received")}>Receber</Button>
+                  )}
+                  {col.key === "received" && (
+                    <div className="flex flex-col gap-1">
                       <Button size="sm" onClick={() => transitionOrder(order.dbId!, "approved")}>Aprovar</Button>
-                      <Button size="sm" variant="destructive" onClick={() => transitionOrder(order.dbId!, "rejected", "Motivo pendente")}>Negar</Button>
-                    </>
+                      <Button size="sm" variant="destructive" onClick={() => {
+                        const reason = prompt("Informe o motivo da divergência:");
+                        if (reason) transitionOrder(order.dbId!, "rejected", `Divergência: ${reason}`);
+                      }}>Divergência</Button>
+                    </div>
                   )}
                   {col.key === "separating" && <Button size="sm" onClick={() => transitionOrder(order.dbId!, "shipped")}>Despachar</Button>}
                   {col.key === "shipped" && <Button size="sm" variant="outline" onClick={() => transitionOrder(order.dbId!, "delivered")}>Finalizar</Button>}
