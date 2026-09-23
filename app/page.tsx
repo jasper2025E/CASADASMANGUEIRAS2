@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { Barcode, Boxes, ChevronDown, ClipboardCheck, FileSpreadsheet, LayoutDashboard, Menu, PackagePlus, Plus, RotateCcw, Search, Settings, ShoppingCart, Upload, X } from "lucide-react";
+import { Barcode, Boxes, ChevronDown, ClipboardCheck, FileSpreadsheet, LayoutDashboard, Menu, PackagePlus, Plus, RotateCcw, Search, Settings, ShoppingCart, Upload, X, Zap, LayoutGrid, Table, LogOut, SlidersHorizontal, Sparkles, Building2 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import productsSeed from "@/lib/products.json";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { ProductBarcode } from "@/components/product-barcode";
 import { normalizeFulfillmentStage, FULFILLMENT_STAGES, type FulfillmentStage } from "@/components/order-progress";
 import { GlobalSystemDashboard } from "@/components/global-system-dashboard";
 import { OrdersModule, type OrderSubTab } from "@/components/orders-module";
+import { ErpOrderModal } from "@/components/erp-order-modal";
 import { supabase } from "@/lib/supabase";
 import { can, type PermissionKey, type UserAccess } from "@/lib/access";
 import type { User } from "@supabase/supabase-js";
@@ -97,6 +98,86 @@ export default function Home() {
   const [cloudStatus, setCloudStatus] = useState("Conectando ao banco...");
   const [syncAttempt, setSyncAttempt] = useState(0);
   const [savingOrder, setSavingOrder] = useState(false);
+  const [erpModalOpen, setErpModalOpen] = useState(false);
+  const [erpModalInitialOrder, setErpModalInitialOrder] = useState<Order | null>(null);
+  const [sidebarFilter, setSidebarFilter] = useState("");
+
+  // Shortcut F3 listener to quickly open the ERP Order Modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "F3") {
+        e.preventDefault();
+        setErpModalInitialOrder(null);
+        setErpModalOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  async function handleSaveErpOrder(
+    status: "Rascunho" | "Finalizado",
+    orderData: {
+      items: Array<Product & { quantity: number; discount?: number; unitPrice?: number }>;
+      supplier: string;
+      notes?: string;
+      orderType?: string;
+      transportType?: string;
+      paymentTerm?: string;
+    }
+  ) {
+    if (!can(access, "orders.create")) return void toast.error("Seu perfil não pode criar pedidos.");
+    if (!orderData.items.length) return void toast.error("Adicione pelo menos um produto ao pedido.");
+
+    const order: Order = {
+      id: erpModalInitialOrder?.id || `PED-${String(Date.now()).slice(-6)}`,
+      supplier: orderData.supplier || (Array.from(new Set(orderData.items.map((i) => i.supplier))).length === 1 ? orderData.items[0].supplier : "Vários fornecedores"),
+      createdAt: new Date().toISOString(),
+      status,
+      fulfillmentStage: status === "Finalizado" ? "submitted" : "draft",
+      originOrganizationId: organizationId || undefined,
+      destinationOrganizationId: destinationOrganizationId || undefined,
+      originOrganizationName: organizationName,
+      destinationOrganizationName: "Centro de Distribuição",
+      reviewMessage: orderData.notes,
+      items: orderData.items.map((i) => ({ ...i, quantity: i.quantity })),
+    };
+
+    try {
+      if (organizationId && destinationOrganizationId && user) {
+        const { data: saved, error } = await supabase.from("purchase_orders").insert({
+          organization_id: organizationId,
+          destination_organization_id: destinationOrganizationId,
+          order_number: order.id,
+          supplier: order.supplier,
+          status,
+          distribution_status: status === "Finalizado" ? "submitted" : "draft",
+          created_by: user.id,
+        }).select("id").single();
+        if (error || !saved) throw error || new Error("Erro ao salvar pedido no banco");
+        order.dbId = saved.id;
+        const { error: itemError } = await supabase.from("purchase_order_items").insert(
+          orderData.items.map((item) => ({
+            order_id: saved.id,
+            product_id: item.id,
+            quantity: item.quantity,
+            unit: item.unit,
+          }))
+        );
+        if (itemError) {
+          await supabase.from("purchase_orders").delete().eq("id", saved.id);
+          throw itemError;
+        }
+      }
+
+      const updated = [order, ...orders.filter((o) => o.id !== order.id)];
+      setOrders(updated);
+      localStorage.setItem("pedido-central-orders", JSON.stringify(updated));
+      toast.success(status === "Finalizado" ? "Pedido emitido com sucesso!" : "Rascunho de pedido salvo.");
+    } catch {
+      toast.error("Não foi possível salvar o pedido. Tente novamente.");
+    }
+  }
 
   useEffect(() => {
     let resolved = false;
@@ -426,15 +507,180 @@ export default function Home() {
 
   if (authLoading) return <main className="auth-page"><div className="auth-loading">Carregando acesso seguro...</div></main>;
   if (!user) return <AuthScreen />;
+
+  const filteredNavItems = visibleNavItems.filter((item) =>
+    !sidebarFilter || item.label.toLowerCase().includes(sidebarFilter.toLowerCase())
+  );
+
   return <div className="app-shell">
     <Toaster richColors position="top-right" />
     <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
-      <div className="brand"><div className="brand-mark"><Image src="/brand/casa-das-mangueiras-logo.webp" width={40} height={40} priority alt="Casa das Mangueiras" /></div><div><strong>CDM</strong><span>{organizationName}</span></div><button className="mobile-close" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X /></button></div>
-      <nav><p className="nav-label">OPERAÇÃO</p>{visibleNavItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => { setView(item.id); setSidebarOpen(false); }}><Icon size={19} /><span>{item.label}</span>{item.id === "order" && selectedItems.length > 0 && <b>{selectedItems.length}</b>}</button>; })}</nav>
-      <div className="sidebar-foot"><div className="user-card"><div className="avatar">{(user.email?.[0] || "C").toUpperCase()}</div><div><strong>{user.email?.split("@")[0] || "Equipe CDM"}</strong><span>{access?.role === "support" ? "Suporte · acesso total" : cloudStatus}</span></div></div></div>
+      <div className="brand">
+        <div className="brand-mark">
+          <Image src="/brand/casa-das-mangueiras-logo.webp" width={40} height={40} priority alt="Casa das Mangueiras" />
+        </div>
+        <div>
+          <strong>CASA DAS MANGUEIRAS</strong>
+          <span className="flex items-center gap-1.5 text-xs text-[#ded3d5]">
+            <Building2 className="h-3 w-3 text-[#ff9e9e]" /> {organizationName}
+          </span>
+        </div>
+        <button className="mobile-close" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X /></button>
+      </div>
+
+      <div className="px-3 pt-3 pb-1">
+        <button
+          type="button"
+          onClick={() => {
+            setErpModalInitialOrder(null);
+            setErpModalOpen(true);
+            setSidebarOpen(false);
+          }}
+          className="w-full flex items-center justify-between px-3 py-2.5 bg-gradient-to-r from-[#8a1418] to-[#600609] hover:from-[#9c181d] hover:to-[#73090d] text-white rounded-lg text-xs font-bold tracking-wide shadow-sm border border-[#a82428] transition active:scale-[0.99]"
+        >
+          <span className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-amber-300 fill-amber-300" />
+            <span>EMISSÃO RÁPIDA / PDV</span>
+          </span>
+          <kbd className="px-1.5 py-0.5 bg-black/30 rounded text-[10px] font-mono text-white/90">F3</kbd>
+        </button>
+      </div>
+
+      <nav>
+        <p className="nav-label">OPERAÇÕES & VENDAS</p>
+        {filteredNavItems.filter((i) => i.id === "dashboard" || i.id === "order").map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              className={view === item.id ? "active" : ""}
+              onClick={() => {
+                setView(item.id);
+                setSidebarOpen(false);
+              }}
+            >
+              <Icon size={18} />
+              <span>{item.label}</span>
+              {item.id === "order" && selectedItems.length > 0 && <b>{selectedItems.length}</b>}
+            </button>
+          );
+        })}
+
+        <p className="nav-label mt-4">ESTOQUE & PRODUTOS</p>
+        {filteredNavItems.filter((i) => i.id === "products" || i.id === "balance").map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              className={view === item.id ? "active" : ""}
+              onClick={() => {
+                setView(item.id);
+                setSidebarOpen(false);
+              }}
+            >
+              <Icon size={18} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+
+        <p className="nav-label mt-4">SISTEMA & GESTÃO</p>
+        {filteredNavItems.filter((i) => i.id === "settings").map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              className={view === item.id ? "active" : ""}
+              onClick={() => {
+                setView(item.id);
+                setSidebarOpen(false);
+              }}
+            >
+              <Icon size={18} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="sidebar-foot">
+        <div className="user-card">
+          <div className="avatar">{(user.email?.[0] || "C").toUpperCase()}</div>
+          <div>
+            <strong>{user.email?.split("@")[0] || "Equipe CDM"}</strong>
+            <span>{access?.role === "support" ? "Suporte · Acesso Total" : cloudStatus}</span>
+          </div>
+        </div>
+      </div>
     </aside>
+
     {sidebarOpen && <button className="backdrop" aria-label="Fechar menu" onClick={() => setSidebarOpen(false)} />}
-    <main className="main-area"><header className="topbar"><button className="menu-button" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu"><Menu /></button><div className="topbar-search"><Search size={18} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar produto, código ou medida..." /></div><div className="topbar-actions"><span className={`sync-dot ${cloudStatus.startsWith("Falha") ? "sync-error" : cloudStatus === "Dados sincronizados" ? "sync-ok" : "sync-loading"}`} /> {cloudStatus}<button className="logout-button" onClick={() => supabase.auth.signOut()}>Sair</button></div></header>
+
+    <main className="main-area">
+      <header className="topbar">
+        <button className="menu-button" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu">
+          <Menu />
+        </button>
+
+        {/* Workspace Nav Tabs */}
+        <div className="workspace-tabs flex items-center gap-1 overflow-x-auto max-w-2xl py-1">
+          {visibleNavItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = view === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setView(item.id)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                  isActive
+                    ? "bg-[#790a0e] text-white shadow-sm"
+                    : "text-[#695a5c] hover:bg-[#f6e8ea] hover:text-[#790a0e]"
+                }`}
+              >
+                <Icon size={14} />
+                <span>{item.label}</span>
+                {item.id === "order" && selectedItems.length > 0 && (
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${isActive ? "bg-white text-[#790a0e]" : "bg-[#790a0e] text-white"}`}>
+                    {selectedItems.length}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="topbar-actions ml-auto flex items-center gap-3">
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              setErpModalInitialOrder(null);
+              setErpModalOpen(true);
+            }}
+            className="hidden sm:inline-flex items-center gap-2 bg-[#790a0e] hover:bg-[#600609] text-white text-xs font-bold h-8 px-3 shadow-sm border border-[#580508]"
+          >
+            <Zap className="h-3.5 w-3.5 text-amber-300 fill-amber-300" />
+            <span>Novo Pedido</span>
+            <kbd className="hidden md:inline px-1 py-0.2 bg-black/25 rounded text-[10px] font-mono">F3</kbd>
+          </Button>
+
+          <div className="flex items-center gap-2 text-xs font-medium text-[#695a5c] bg-[#faf7f7] px-2.5 py-1 rounded-md border border-[#ede5e6]">
+            <span className={`sync-dot ${cloudStatus.startsWith("Falha") ? "sync-error" : cloudStatus === "Dados sincronizados" ? "sync-ok" : "sync-loading"}`} />
+            <span className="hidden lg:inline">{cloudStatus}</span>
+          </div>
+
+          <button
+            type="button"
+            className="logout-button flex items-center gap-1.5 text-xs text-[#7a6c6e] hover:text-[#790a0e] transition px-2 py-1 rounded hover:bg-[#f6e8ea]"
+            onClick={() => supabase.auth.signOut()}
+          >
+            <LogOut size={14} />
+            <span className="hidden sm:inline">Sair</span>
+          </button>
+        </div>
+      </header>
+
       {view === "dashboard" && can(access, "dashboard.view") && (
         <GlobalSystemDashboard
           products={products}
@@ -457,6 +703,7 @@ export default function Home() {
           onImport={() => setImportOpen(true)}
         />
       )}
+
       {view === "order" && can(access, "orders.view") && (
         <OrdersModule
           canCreate={can(access, "orders.create")}
@@ -489,23 +736,342 @@ export default function Home() {
           removeOrder={removeOrder}
           repeatOrder={repeatOrder}
           updateOrderStage={updateOrderStage}
+          onOpenErpModal={(targetOrder) => {
+            setErpModalInitialOrder(targetOrder || null);
+            setErpModalOpen(true);
+          }}
         />
       )}
-      {view === "products" && can(access, "products.view") && <Products products={products} canCreate={can(access, "products.create")} canEdit={can(access, "products.edit")} canImport={can(access, "products.import")} onEdit={(product, tab = "dados") => { setCreatingProduct(false); setProductModal(product); setProductModalTab(tab); }} onCreate={createProduct} onImport={() => setImportOpen(true)} />}
-      {view === "balance" && can(access, "inventory.view") && <BalanceModule products={products} organizationId={organizationId} userId={user.id} canCount={can(access, "inventory.count")} canManage={can(access, "inventory.manage")} />}
-      {view === "settings" && (organizationId ? <SettingsModule user={user} organizationId={organizationId} onOrganizationChange={() => window.location.reload()} /> : <section className="content settings-unavailable"><div className="panel"><Settings size={30}/><div><span className="eyebrow">CONFIGURAÇÕES</span><h1>{cloudStatus.startsWith("Falha") ? "Não foi possível carregar agora" : "Preparando sua organização"}</h1><p>{cloudStatus.startsWith("Falha") ? "A conexão foi interrompida. Tente novamente; seus dados locais continuam preservados." : "Estamos conectando sua conta e preparando os dados da empresa."}</p></div><Button onClick={() => setSyncAttempt((attempt) => attempt + 1)} disabled={!cloudStatus.startsWith("Falha")}><RotateCcw size={16}/> Tentar novamente</Button></div></section>)}
+
+      {view === "products" && can(access, "products.view") && (
+        <Products
+          products={products}
+          canCreate={can(access, "products.create")}
+          canEdit={can(access, "products.edit")}
+          canImport={can(access, "products.import")}
+          onEdit={(product, tab = "dados") => {
+            setCreatingProduct(false);
+            setProductModal(product);
+            setProductModalTab(tab);
+          }}
+          onCreate={createProduct}
+          onImport={() => setImportOpen(true)}
+        />
+      )}
+
+      {view === "balance" && can(access, "inventory.view") && (
+        <BalanceModule
+          products={products}
+          organizationId={organizationId}
+          userId={user.id}
+          canCount={can(access, "inventory.count")}
+          canManage={can(access, "inventory.manage")}
+        />
+      )}
+
+      {view === "settings" && (
+        organizationId ? (
+          <SettingsModule
+            user={user}
+            organizationId={organizationId}
+            onOrganizationChange={() => window.location.reload()}
+          />
+        ) : (
+          <section className="content settings-unavailable">
+            <div className="panel">
+              <Settings size={30} />
+              <div>
+                <span className="eyebrow">CONFIGURAÇÕES</span>
+                <h1>{cloudStatus.startsWith("Falha") ? "Não foi possível carregar agora" : "Preparando sua organização"}</h1>
+                <p>{cloudStatus.startsWith("Falha") ? "A conexão foi interrompida. Tente novamente; seus dados locais continuam preservados." : "Estamos conectando sua conta e preparando os dados da empresa."}</p>
+              </div>
+              <Button onClick={() => setSyncAttempt((attempt) => attempt + 1)} disabled={!cloudStatus.startsWith("Falha")}>
+                <RotateCcw size={16} /> Tentar novamente
+              </Button>
+            </div>
+          </section>
+        )
+      )}
     </main>
-    <Dialog open={!!productModal} onOpenChange={(open) => { if (!open) { setProductModal(null); setCreatingProduct(false); } }}><DialogContent className="sm:max-w-[680px] max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>{creatingProduct ? "Cadastrar produto" : "Detalhes do produto"}</DialogTitle></DialogHeader>{productModal && <ProductEditor key={`${productModal.id}-${productModalTab}`} product={productModal} initialTab={productModalTab} onSave={saveProduct} />}</DialogContent></Dialog>
-    <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) setImportPreview(null); }}><DialogContent className="sm:max-w-[600px]"><DialogHeader><DialogTitle>Importar novos produtos</DialogTitle></DialogHeader><div className="import-box"><label className="file-drop"><FileSpreadsheet size={30} /><strong>{importing ? "Analisando a planilha..." : "Selecionar planilha de produtos"}</strong><span>XLSX, XLS ou CSV · os produtos repetidos serão ignorados</span><input type="file" accept=".xlsx,.xls,.csv" disabled={importing} onChange={(e) => inspectImport(e.target.files?.[0])} /></label>{importPreview && <div className="import-result"><div><span>Arquivo</span><strong>{importPreview.fileName}</strong></div><div className="import-metrics"><article><strong>{importPreview.rows.toLocaleString("pt-BR")}</strong><span>linhas lidas</span></article><article className="success"><strong>{importPreview.products.length.toLocaleString("pt-BR")}</strong><span>produtos novos</span></article><article><strong>{importPreview.duplicates.toLocaleString("pt-BR")}</strong><span>duplicados ignorados</span></article><article><strong>{importPreview.invalid.toLocaleString("pt-BR")}</strong><span>linhas inválidas</span></article></div><p>A comparação usa o código do produto. Sem código, utiliza descrição e fornecedor.</p><Button className="w-full" disabled={!importPreview.products.length} onClick={confirmImport}><Upload size={17} /> Confirmar importação</Button></div>}</div></DialogContent></Dialog>
+
+    {/* ERP Order Modal */}
+    <ErpOrderModal
+      open={erpModalOpen}
+      onOpenChange={setErpModalOpen}
+      products={products}
+      initialOrder={erpModalInitialOrder}
+      organizationName={organizationName}
+      onSaveOrder={handleSaveErpOrder}
+    />
+
+    <Dialog open={!!productModal} onOpenChange={(open) => { if (!open) { setProductModal(null); setCreatingProduct(false); } }}>
+      <DialogContent className="sm:max-w-[680px] max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{creatingProduct ? "Cadastrar produto" : "Detalhes do produto"}</DialogTitle>
+        </DialogHeader>
+        {productModal && <ProductEditor key={`${productModal.id}-${productModalTab}`} product={productModal} initialTab={productModalTab} onSave={saveProduct} />}
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) setImportPreview(null); }}>
+      <DialogContent className="sm:max-w-[600px]">
+        <DialogHeader>
+          <DialogTitle>Importar novos produtos</DialogTitle>
+        </DialogHeader>
+        <div className="import-box">
+          <label className="file-drop">
+            <FileSpreadsheet size={30} />
+            <strong>{importing ? "Analisando a planilha..." : "Selecionar planilha de produtos"}</strong>
+            <span>XLSX, XLS ou CSV · os produtos repetidos serão ignorados</span>
+            <input type="file" accept=".xlsx,.xls,.csv" disabled={importing} onChange={(e) => inspectImport(e.target.files?.[0])} />
+          </label>
+          {importPreview && (
+            <div className="import-result">
+              <div>
+                <span>Arquivo</span>
+                <strong>{importPreview.fileName}</strong>
+              </div>
+              <div className="import-metrics">
+                <article><strong>{importPreview.rows.toLocaleString("pt-BR")}</strong><span>linhas lidas</span></article>
+                <article className="success"><strong>{importPreview.products.length.toLocaleString("pt-BR")}</strong><span>produtos novos</span></article>
+                <article><strong>{importPreview.duplicates.toLocaleString("pt-BR")}</strong><span>duplicados ignorados</span></article>
+                <article><strong>{importPreview.invalid.toLocaleString("pt-BR")}</strong><span>linhas inválidas</span></article>
+              </div>
+              <p>A comparação usa o código do produto. Sem código, utiliza descrição e fornecedor.</p>
+              <Button className="w-full" disabled={!importPreview.products.length} onClick={confirmImport}>
+                <Upload size={17} /> Confirmar importação
+              </Button>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>;
 }
 
 function Products({ products, canCreate, canEdit, canImport, onEdit, onCreate, onImport }: { products: Product[]; canCreate: boolean; canEdit: boolean; canImport: boolean; onEdit: (product: Product, tab?: "dados" | "codigo") => void; onCreate: () => void; onImport: () => void }) {
-  const [term, setTerm] = useState(""); const [supplierFilter, setSupplierFilter] = useState("Todos"); const [limit, setLimit] = useState(120);
+  const [term, setTerm] = useState("");
+  const [supplierFilter, setSupplierFilter] = useState("Todos");
+  const [limit, setLimit] = useState(120);
+  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+
   const suppliers = useMemo(() => Array.from(new Set(products.map((p) => p.supplier))).sort((a,b) => a.localeCompare(b, "pt-BR")), [products]);
   const filtered = useMemo(() => products.filter((p) => (supplierFilter === "Todos" || p.supplier === supplierFilter) && `${p.description} ${p.code} ${p.supplier} ${p.brand}`.toLowerCase().includes(term.toLowerCase())), [products, supplierFilter, term]);
-  const money=(value?:number|null)=>value==null?"—":new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(value);
-  return <section className="content"><div className="page-heading"><div><span className="eyebrow">CATÁLOGO MESTRE</span><h1>Produtos</h1><p>Produtos, custos, preços, estoque e EAN‑13 em uma base organizada.</p></div><div className="heading-actions">{canCreate && <Button variant="outline" onClick={onCreate}><Plus size={17}/> Novo produto</Button>}{canImport && <Button onClick={onImport}><Upload size={17} /> Importar planilha</Button>}</div></div><div className="products-toolbar"><div className="inline-search"><Search size={17} /><Input value={term} onChange={(e) => { setTerm(e.target.value); setLimit(120); }} placeholder="Pesquisar produto, código, marca ou fornecedor..." /></div><div className="select-wrap"><select value={supplierFilter} onChange={(e) => { setSupplierFilter(e.target.value); setLimit(120); }}><option>Todos</option>{suppliers.map((name) => <option key={name}>{name}</option>)}</select><ChevronDown size={14} /></div><Badge variant="secondary">{filtered.length.toLocaleString("pt-BR")} produtos</Badge></div><div className="product-grid">{filtered.slice(0, limit).map((product) => <div key={product.id} className="product-card flex items-start justify-between gap-2 p-3"><div className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer" onClick={() => canEdit ? onEdit(product, "dados") : undefined}><div className="card-image">{product.image ? <img src={product.image} alt="" /> : <PackagePlus />}</div><div className="flex-1 min-w-0"><span>{product.supplier} · {product.code || product.category}</span><strong>{product.description}</strong><small>{product.brand !== product.supplier ? `${product.brand} · ` : ""}Estoque: {product.stock} {product.unit}</small><small className="mt-1 flex gap-3"><b>Custo: {money(product.cost)}</b><b className="text-emerald-700">Venda: {money(product.price)}</b></small></div></div><button type="button" className="p-2 text-[#9c8e90] hover:text-[#790a0e] hover:bg-[#f6e8ea] rounded-lg transition shrink-0" title="Ver código de barras EAN-13" onClick={(e) => { e.stopPropagation(); onEdit(product, "codigo"); }}><Barcode size={18} /></button></div>)}</div>{filtered.length > limit && <div className="load-more"><Button variant="outline" onClick={() => setLimit((value) => value + 120)}>Mostrar mais produtos ({(filtered.length - limit).toLocaleString("pt-BR")})</Button></div>}</section>;
+  const money = (value?: number | null) => value == null ? "—" : new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+
+  return (
+    <section className="content">
+      <div className="page-heading">
+        <div>
+          <span className="eyebrow">CATÁLOGO MESTRE</span>
+          <h1>Catálogo de Produtos</h1>
+          <p>Produtos, códigos SKU, código de barras EAN‑13, custos, estoque e precificação oficial.</p>
+        </div>
+        <div className="heading-actions flex items-center gap-2">
+          {canCreate && (
+            <Button onClick={onCreate} className="bg-[#790a0e] hover:bg-[#600609] text-white">
+              <Plus size={16} className="mr-1" /> Novo produto
+            </Button>
+          )}
+          {canImport && (
+            <Button variant="outline" onClick={onImport} className="border-[#ded3d5]">
+              <Upload size={16} className="mr-1" /> Importar planilha
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="products-toolbar flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="flex flex-1 items-center gap-3 min-w-[280px]">
+          <div className="inline-search flex-1">
+            <Search size={16} className="text-[#8c7e80]" />
+            <Input
+              value={term}
+              onChange={(e) => {
+                setTerm(e.target.value);
+                setLimit(120);
+              }}
+              placeholder="Pesquisar por código SKU, EAN, descrição, marca ou fornecedor..."
+            />
+          </div>
+          <div className="select-wrap">
+            <select
+              value={supplierFilter}
+              onChange={(e) => {
+                setSupplierFilter(e.target.value);
+                setLimit(120);
+              }}
+            >
+              <option>Todos</option>
+              {suppliers.map((name) => (
+                <option key={name}>{name}</option>
+              ))}
+            </select>
+            <ChevronDown size={14} />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Badge variant="secondary" className="font-semibold text-xs py-1 px-3 bg-[#ede5e6] text-[#423638]">
+            {filtered.length.toLocaleString("pt-BR")} itens cadastrados
+          </Badge>
+
+          <div className="flex items-center bg-[#faf7f7] border border-[#ede5e6] rounded-lg p-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              className={`p-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition ${
+                viewMode === "table" ? "bg-white shadow text-[#790a0e] font-bold" : "text-[#7a6c6e] hover:text-[#211718]"
+              }`}
+              title="Exibição em Tabela ERP"
+            >
+              <Table size={15} />
+              <span className="hidden sm:inline">Tabela</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              className={`p-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition ${
+                viewMode === "grid" ? "bg-white shadow text-[#790a0e] font-bold" : "text-[#7a6c6e] hover:text-[#211718]"
+              }`}
+              title="Exibição em Cards"
+            >
+              <LayoutGrid size={15} />
+              <span className="hidden sm:inline">Cards</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {viewMode === "table" ? (
+        <div className="bg-white rounded-xl border border-[#ede5e6] shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-[#faf7f7] border-b border-[#ede5e6] text-[#7a6c6e] font-bold uppercase text-[10px] tracking-wider">
+                <tr>
+                  <th className="py-2.5 px-3 w-12 text-center">Foto</th>
+                  <th className="py-2.5 px-3 w-28">Código SKU</th>
+                  <th className="py-2.5 px-3">Descrição do Produto</th>
+                  <th className="py-2.5 px-3 w-36">Fornecedor / Marca</th>
+                  <th className="py-2.5 px-3 w-20 text-center">Unidade</th>
+                  <th className="py-2.5 px-3 w-24 text-right">Estoque</th>
+                  <th className="py-2.5 px-3 w-28 text-right">Custo</th>
+                  <th className="py-2.5 px-3 w-28 text-right">Preço Venda</th>
+                  <th className="py-2.5 px-3 w-20 text-center">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#f2ecec]">
+                {filtered.slice(0, limit).map((product) => (
+                  <tr
+                    key={product.id}
+                    className="hover:bg-[#fcf8f8] transition cursor-pointer"
+                    onClick={() => canEdit ? onEdit(product, "dados") : undefined}
+                  >
+                    <td className="py-2 px-3 text-center">
+                      <div className="w-9 h-9 rounded bg-[#f6e8ea] flex items-center justify-center overflow-hidden mx-auto border border-[#ede5e6]">
+                        {product.image ? (
+                          <img src={product.image} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <PackagePlus className="w-4 h-4 text-[#790a0e]/60" />
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-2 px-3 font-mono font-bold text-[#790a0e]">
+                      {product.code || "—"}
+                    </td>
+                    <td className="py-2 px-3 font-semibold text-[#211718]">
+                      <div>{product.description}</div>
+                      {product.barcode && (
+                        <div className="text-[10px] font-mono text-[#8c7e80] flex items-center gap-1 mt-0.5">
+                          <Barcode className="w-3 h-3 text-[#790a0e]" />
+                          EAN: {product.barcode}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-2 px-3 text-[#605153]">
+                      <div className="font-medium truncate max-w-[140px]">{product.supplier}</div>
+                      {product.brand && product.brand !== product.supplier && (
+                        <div className="text-[10px] text-[#918183]">{product.brand}</div>
+                      )}
+                    </td>
+                    <td className="py-2 px-3 text-center font-mono text-[#605153]">
+                      {product.unit}
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono font-semibold">
+                      <span className={product.stock <= 5 ? "text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded" : "text-[#211718]"}>
+                        {product.stock.toLocaleString("pt-BR")}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono text-[#7a6c6e]">
+                      {money(product.cost)}
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono font-bold text-emerald-700">
+                      {money(product.price)}
+                    </td>
+                    <td className="py-2 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        className="p-1.5 text-[#8c7e80] hover:text-[#790a0e] hover:bg-[#f6e8ea] rounded-md transition"
+                        title="Ver / Imprimir código de barras EAN-13"
+                        onClick={() => onEdit(product, "codigo")}
+                      >
+                        <Barcode size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="product-grid">
+          {filtered.slice(0, limit).map((product) => (
+            <div key={product.id} className="product-card flex items-start justify-between gap-2 p-3">
+              <div
+                className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer"
+                onClick={() => canEdit ? onEdit(product, "dados") : undefined}
+              >
+                <div className="card-image">
+                  {product.image ? <img src={product.image} alt="" /> : <PackagePlus />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span>{product.supplier} · {product.code || product.category}</span>
+                  <strong>{product.description}</strong>
+                  <small>
+                    {product.brand !== product.supplier ? `${product.brand} · ` : ""}Estoque: {product.stock} {product.unit}
+                  </small>
+                  <small className="mt-1 flex gap-3">
+                    <b>Custo: {money(product.cost)}</b>
+                    <b className="text-emerald-700">Venda: {money(product.price)}</b>
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="p-2 text-[#9c8e90] hover:text-[#790a0e] hover:bg-[#f6e8ea] rounded-lg transition shrink-0"
+                title="Ver código de barras EAN-13"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(product, "codigo");
+                }}
+              >
+                <Barcode size={18} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {filtered.length > limit && (
+        <div className="load-more mt-4">
+          <Button variant="outline" onClick={() => setLimit((value) => value + 120)}>
+            Mostrar mais produtos ({(filtered.length - limit).toLocaleString("pt-BR")})
+          </Button>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function ProductEditor({ product, initialTab = "dados", onSave }: { product: Product; initialTab?: "dados" | "codigo"; onSave: (product: Product) => void }) {

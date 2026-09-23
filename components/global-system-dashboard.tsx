@@ -66,12 +66,11 @@ export function GlobalSystemDashboard({
   onRefreshOrders,
 }: GlobalSystemDashboardProps) {
   // Memoized callback for navigations
-  const handleNavigate = React.useCallback(onNavigate, [onNavigate]);
-  const handleSelectSupplier = React.useCallback(onSelectSupplierForOrder, [onSelectSupplierForOrder]);
-  const handleCreateProduct = React.useCallback(onCreateProduct, [onCreateProduct]);
-  const handleImport = React.useCallback(onImport, [onImport]);
-  const handleUpdateOrderStage = React.useCallback(onUpdateOrderStage, [onUpdateOrderStage]);
-  const handleRefreshOrders = React.useCallback(onRefreshOrders, [onRefreshOrders]);
+  const handleNavigate = React.useCallback((v: string, subTab?: "compose" | "history" | "analytics") => onNavigate(v, subTab), [onNavigate]);
+  const handleSelectSupplier = React.useCallback((s: string) => onSelectSupplierForOrder(s), [onSelectSupplierForOrder]);
+  const handleCreateProduct = React.useCallback(() => onCreateProduct(), [onCreateProduct]);
+  const handleImport = React.useCallback(() => onImport(), [onImport]);
+  const handleRefreshOrders = React.useCallback(() => onRefreshOrders(), [onRefreshOrders]);
 
   // 1. Stock Valuation & Metrics
   const stats = useMemo(() => {
