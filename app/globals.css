@@ -185,7 +185,7 @@ button, input, select, textarea { font: inherit; }
 
 /* Main Area */
 .main-area {
-  margin-left: 248px;
+  margin-left: 260px;
   min-height: 100vh;
 }
 .topbar {

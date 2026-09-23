@@ -101,8 +101,12 @@ export function ErpOrderModal({
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync when initial order is opened or modal opens
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(false);
+  const [prevInitialOrderId, setPrevInitialOrderId] = useState<string | null>(null);
+
+  if (open !== prevOpen || (initialOrder?.id ?? null) !== prevInitialOrderId) {
+    setPrevOpen(open);
+    setPrevInitialOrderId(initialOrder?.id ?? null);
     if (open) {
       if (initialOrder) {
         setOrderNumber(initialOrder.id);
@@ -116,8 +120,7 @@ export function ErpOrderModal({
           }))
         );
       } else {
-        const rand = Math.floor(1000 + Math.random() * 9000);
-        setOrderNumber(`CDM-${rand}S`);
+        setOrderNumber(`CDM-PDV`);
         setOrderItems([]);
         setSelectedProduct(null);
         setBarcodeInput("");
@@ -126,7 +129,7 @@ export function ErpOrderModal({
       }
       setActiveTab("itens");
     }
-  }, [open, initialOrder]);
+  }
 
   // Focus barcode input when modal opens or when tab changes to "itens"
   useEffect(() => {

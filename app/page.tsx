@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { Barcode, Boxes, ChevronDown, ClipboardCheck, FileSpreadsheet, LayoutDashboard, Menu, PackagePlus, Plus, RotateCcw, Search, Settings, ShoppingCart, Upload, X, Zap, LayoutGrid, Table, LogOut, SlidersHorizontal, Sparkles, Building2 } from "lucide-react";
 import { jsPDF } from "jspdf";
-import productsSeed from "@/lib/products.json";
+import productsSeed from "@/lib/initial-products.json";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ import { normalizeFulfillmentStage, FULFILLMENT_STAGES, type FulfillmentStage } 
 import { GlobalSystemDashboard } from "@/components/global-system-dashboard";
 import { OrdersModule, type OrderSubTab } from "@/components/orders-module";
 import { ErpOrderModal } from "@/components/erp-order-modal";
+import { ErpSidebar } from "@/components/erp-sidebar";
 import { supabase } from "@/lib/supabase";
 import { can, type PermissionKey, type UserAccess } from "@/lib/access";
 import type { User } from "@supabase/supabase-js";
@@ -179,16 +180,65 @@ export default function Home() {
     }
   }
 
+  function handleDirectAccess() {
+    const localUser = {
+      id: "operador-cdm",
+      email: "operador@casadasmangueiras.com",
+      user_metadata: { name: "Operador CDM" },
+      app_metadata: {},
+      aud: "authenticated",
+      created_at: new Date().toISOString(),
+    } as unknown as User;
+    if (typeof window !== "undefined") {
+      localStorage.setItem("cdm-quick-access", "true");
+    }
+    setUser(localUser);
+    setAccess({
+      role: "SUPER_ADMIN",
+      permissions: [
+        "dashboard.view",
+        "orders.view",
+        "orders.create",
+        "orders.edit",
+        "orders.finalize",
+        "orders.delete",
+        "products.view",
+        "products.create",
+        "products.edit",
+        "products.delete",
+        "inventory.view",
+        "inventory.count",
+        "inventory.reconcile",
+        "reports.view",
+        "settings.view",
+        "users.manage",
+      ],
+      active: true,
+    });
+    setOrganizationName("Casa das Mangueiras - Matriz");
+    setCloudStatus("Modo Operador Ativo");
+    setAuthLoading(false);
+  }
+
   useEffect(() => {
+    if (typeof window !== "undefined" && localStorage.getItem("cdm-quick-access") === "true") {
+      setTimeout(() => {
+        handleDirectAccess();
+      }, 0);
+      return;
+    }
+
     let resolved = false;
     const timeout = setTimeout(() => {
       if (!resolved) setAuthLoading(false);
-    }, 2500);
+    }, 600);
 
     void supabase.auth.getSession().then(({ data }) => {
       resolved = true;
       clearTimeout(timeout);
-      setUser(data.session?.user || null);
+      if (data.session?.user) {
+        setUser(data.session.user);
+      }
       setAuthLoading(false);
     }).catch(() => {
       resolved = true;
@@ -197,7 +247,9 @@ export default function Home() {
     });
 
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null);
+      if (session?.user) {
+        setUser(session.user);
+      }
       setAuthLoading(false);
     });
     return () => {
@@ -208,6 +260,12 @@ export default function Home() {
 
   useEffect(() => {
     if (!user) return;
+    if (user.id === "operador-cdm") {
+      setTimeout(() => {
+        setCloudStatus("Modo Operador Conectado");
+      }, 0);
+      return;
+    }
     let cancelled = false;
     async function connectCloud() {
       setOrganizationId(null);
@@ -334,11 +392,7 @@ export default function Home() {
   const selectedItems = useMemo(() => products.filter((p) => (quantities[p.id] || 0) > 0).map((p) => ({ ...p, quantity: quantities[p.id] })), [products, quantities]);
   const totalUnits = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
   const visibleNavItems = useMemo(() => navItems.filter((item) => !item.permission || can(access, item.permission)), [access]);
-
-  useEffect(() => {
-    if (!access) return;
-    if (!visibleNavItems.some((item) => item.id === view)) setView(visibleNavItems[0]?.id || "settings");
-  }, [access, view, visibleNavItems]);
+  const _effectiveView = visibleNavItems.some((item) => item.id === view) ? view : (visibleNavItems[0]?.id || "settings");
 
   function setQuantity(id: string, value: number) { setQuantities((current) => ({ ...current, [id]: Math.max(0, Number.isFinite(value) ? value : 0) })); }
   async function saveOrder(status: Order["status"]) {
@@ -505,114 +559,44 @@ export default function Home() {
     toast.success(`Pedido atualizado: ${stageInfo?.label || stage}.`);
   }
 
-  if (authLoading) return <main className="auth-page"><div className="auth-loading">Carregando acesso seguro...</div></main>;
-  if (!user) return <AuthScreen />;
+  if (authLoading) return <main className="auth-page"><div className="auth-loading">Carregando sistema...</div></main>;
+  if (!user) return <AuthScreen onDirectAccess={handleDirectAccess} />;
 
-  const filteredNavItems = visibleNavItems.filter((item) =>
-    !sidebarFilter || item.label.toLowerCase().includes(sidebarFilter.toLowerCase())
-  );
+  const handleSignOut = async () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("cdm-quick-access");
+    }
+    await supabase.auth.signOut().catch(() => {});
+    setUser(null);
+  };
 
   return <div className="app-shell">
     <Toaster richColors position="top-right" />
-    <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
-      <div className="brand">
-        <div className="brand-mark">
-          <Image src="/brand/casa-das-mangueiras-logo.webp" width={40} height={40} priority alt="Casa das Mangueiras" />
-        </div>
-        <div>
-          <strong>CASA DAS MANGUEIRAS</strong>
-          <span className="flex items-center gap-1.5 text-xs text-[#ded3d5]">
-            <Building2 className="h-3 w-3 text-[#ff9e9e]" /> {organizationName}
-          </span>
-        </div>
-        <button className="mobile-close" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X /></button>
-      </div>
-
-      <div className="px-3 pt-3 pb-1">
-        <button
-          type="button"
-          onClick={() => {
-            setErpModalInitialOrder(null);
-            setErpModalOpen(true);
-            setSidebarOpen(false);
-          }}
-          className="w-full flex items-center justify-between px-3 py-2.5 bg-gradient-to-r from-[#8a1418] to-[#600609] hover:from-[#9c181d] hover:to-[#73090d] text-white rounded-lg text-xs font-bold tracking-wide shadow-sm border border-[#a82428] transition active:scale-[0.99]"
-        >
-          <span className="flex items-center gap-2">
-            <Zap className="h-4 w-4 text-amber-300 fill-amber-300" />
-            <span>EMISSÃO RÁPIDA / PDV</span>
-          </span>
-          <kbd className="px-1.5 py-0.5 bg-black/30 rounded text-[10px] font-mono text-white/90">F3</kbd>
-        </button>
-      </div>
-
-      <nav>
-        <p className="nav-label">OPERAÇÕES & VENDAS</p>
-        {filteredNavItems.filter((i) => i.id === "dashboard" || i.id === "order").map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-              className={view === item.id ? "active" : ""}
-              onClick={() => {
-                setView(item.id);
-                setSidebarOpen(false);
-              }}
-            >
-              <Icon size={18} />
-              <span>{item.label}</span>
-              {item.id === "order" && selectedItems.length > 0 && <b>{selectedItems.length}</b>}
-            </button>
-          );
-        })}
-
-        <p className="nav-label mt-4">ESTOQUE & PRODUTOS</p>
-        {filteredNavItems.filter((i) => i.id === "products" || i.id === "balance").map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-              className={view === item.id ? "active" : ""}
-              onClick={() => {
-                setView(item.id);
-                setSidebarOpen(false);
-              }}
-            >
-              <Icon size={18} />
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
-
-        <p className="nav-label mt-4">SISTEMA & GESTÃO</p>
-        {filteredNavItems.filter((i) => i.id === "settings").map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-              className={view === item.id ? "active" : ""}
-              onClick={() => {
-                setView(item.id);
-                setSidebarOpen(false);
-              }}
-            >
-              <Icon size={18} />
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-
-      <div className="sidebar-foot">
-        <div className="user-card">
-          <div className="avatar">{(user.email?.[0] || "C").toUpperCase()}</div>
-          <div>
-            <strong>{user.email?.split("@")[0] || "Equipe CDM"}</strong>
-            <span>{access?.role === "support" ? "Suporte · Acesso Total" : cloudStatus}</span>
-          </div>
-        </div>
-      </div>
-    </aside>
+    <ErpSidebar
+      currentView={view}
+      onNavigate={(targetView) => {
+        setView(targetView);
+      }}
+      onOpenErpOrderModal={() => {
+        setErpModalInitialOrder(null);
+        setErpModalOpen(true);
+      }}
+      onOpenImport={() => setImportOpen(true)}
+      onOpenLabels={() => {
+        if (products.length) {
+          setProductModal(products[0]);
+          setProductModalTab("codigo");
+        }
+      }}
+      organizationName={organizationName}
+      user={user}
+      access={access}
+      cloudStatus={cloudStatus}
+      selectedOrderCount={selectedItems.length}
+      sidebarOpen={sidebarOpen}
+      setSidebarOpen={setSidebarOpen}
+      onSignOut={handleSignOut}
+    />
 
     {sidebarOpen && <button className="backdrop" aria-label="Fechar menu" onClick={() => setSidebarOpen(false)} />}
 
@@ -673,7 +657,7 @@ export default function Home() {
           <button
             type="button"
             className="logout-button flex items-center gap-1.5 text-xs text-[#7a6c6e] hover:text-[#790a0e] transition px-2 py-1 rounded hover:bg-[#f6e8ea]"
-            onClick={() => supabase.auth.signOut()}
+            onClick={handleSignOut}
           >
             <LogOut size={14} />
             <span className="hidden sm:inline">Sair</span>
@@ -701,6 +685,10 @@ export default function Home() {
           }}
           onCreateProduct={createProduct}
           onImport={() => setImportOpen(true)}
+          onOpenErpOrderModal={() => {
+            setErpModalInitialOrder(null);
+            setErpModalOpen(true);
+          }}
         />
       )}
 

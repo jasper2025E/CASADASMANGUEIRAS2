@@ -6,7 +6,6 @@ import {
   TrendingUp,
   Boxes,
   AlertTriangle,
-  ShoppingCart,
   Truck,
   CheckCircle2,
   Clock,
@@ -15,8 +14,9 @@ import {
   Plus,
   ArrowRight,
   ClipboardCheck,
-  Building2,
   ShieldCheck,
+  BarChart3,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,7 @@ import {
 } from "@/components/order-progress";
 
 import { KanbanModule } from "@/components/kanban-module";
+import { CategorySalesChart } from "@/components/category-sales-chart";
 import { type UserAccess } from "@/lib/access";
 
 interface GlobalSystemDashboardProps {
@@ -40,8 +41,9 @@ interface GlobalSystemDashboardProps {
   onSelectSupplierForOrder: (supplier: string) => void;
   onCreateProduct: () => void;
   onImport: () => void;
-  onUpdateOrderStage: (orderId: string, stage: FulfillmentStage, message?: string) => void;
+  onUpdateOrderStage?: (orderId: string, stage: FulfillmentStage, message?: string) => void;
   onRefreshOrders: () => void; // ADDED
+  onOpenErpOrderModal?: () => void;
 }
 
 const supplierColors: Record<string, string> = {
@@ -57,15 +59,17 @@ export function GlobalSystemDashboard({
   orders,
   suppliers,
   cloudStatus,
-  access,
+  access: _access,
   onNavigate,
   onSelectSupplierForOrder,
   onCreateProduct,
   onImport,
-  onUpdateOrderStage,
+  onUpdateOrderStage: _onUpdateOrderStage,
   onRefreshOrders,
+  onOpenErpOrderModal,
 }: GlobalSystemDashboardProps) {
   // Memoized callback for navigations
+  const [dashboardTab, setDashboardTab] = React.useState<"overview" | "kanban" | "inventory">("overview");
   const handleNavigate = React.useCallback((v: string, subTab?: "compose" | "history" | "analytics") => onNavigate(v, subTab), [onNavigate]);
   const handleSelectSupplier = React.useCallback((s: string) => onSelectSupplierForOrder(s), [onSelectSupplierForOrder]);
   const handleCreateProduct = React.useCallback(() => onCreateProduct(), [onCreateProduct]);
@@ -194,192 +198,210 @@ export function GlobalSystemDashboard({
   return (
     <section className="content">
       {/* Executive Page Heading */}
-      <div className="page-heading">
+      <div className="page-heading mb-4">
         <div>
-          <span className="eyebrow flex items-center gap-1.5">
-            <ShieldCheck size={14} className="text-[#790a0e]" />
-            PAINEL EXECUTIVO GLOBAL
+          <span className="eyebrow flex items-center gap-1.5 text-[10px] font-bold text-[#790a0e] tracking-wider uppercase">
+            <ShieldCheck size={13} className="text-[#790a0e]" />
+            Painel Executivo CDM
           </span>
-          <h1>Visão geral do sistema</h1>
-          <p>
-            Centro de comando integrado da Casa das Mangueiras: catálogo mestre,
-            valoração patrimonial, saúde do estoque, compras e inventário físico.
+          <h1 className="text-xl font-bold text-[#1a080a] m-0">Visão Geral do Sistema</h1>
+          <p className="text-xs text-[#6e5f61] mt-0.5">
+            Catálogo mestre, valoração patrimonial, vendas por categoria e fluxo de pedidos.
           </p>
         </div>
 
         <div className="heading-actions flex items-center gap-2 flex-wrap">
           <Button
             variant="outline"
+            size="sm"
             onClick={handleImport}
-            className="flex items-center gap-1.5"
+            className="h-8 text-xs font-semibold px-2.5 flex items-center gap-1.5"
           >
-            <FileSpreadsheet size={16} /> Importar catálogo
+            <FileSpreadsheet size={14} /> Importar
           </Button>
           <Button
             variant="outline"
+            size="sm"
             onClick={handleCreateProduct}
-            className="flex items-center gap-1.5"
+            className="h-8 text-xs font-semibold px-2.5 flex items-center gap-1.5"
           >
-            <Plus size={16} /> Novo produto
+            <Plus size={14} /> Novo Produto
           </Button>
           <Button
-            onClick={() => handleNavigate("order", "compose")}
-            className="flex items-center gap-1.5"
+            size="sm"
+            onClick={onOpenErpOrderModal || (() => handleNavigate("order", "compose"))}
+            className="h-8 text-xs font-semibold px-3 bg-[#790a0e] hover:bg-[#600609] text-white flex items-center gap-1.5 shadow-xs"
           >
-            <ShoppingCart size={16} /> Criar pedido
+            <Zap size={14} className="text-amber-300 fill-amber-300" />
+            <span>Novo Pedido (F3)</span>
           </Button>
         </div>
       </div>
 
-      {/* 6 Top Strategic KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3.5 mb-6">
-        {/* KPI 1: Valor em Estoque (Custo) */}
-        <div className="bg-white border border-[#e5dcdd] rounded-xl p-4 flex flex-col justify-between shadow-xs">
+      {/* 4 Compact Strategic KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        {/* KPI 1: Patrimônio (Custo) */}
+        <div className="bg-white border border-[#e5dcdd] rounded-lg p-3.5 flex flex-col justify-between shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-[#756668] uppercase tracking-wider">
+            <span className="text-[10px] font-bold text-[#756668] uppercase tracking-wider">
               Patrimônio (Custo)
             </span>
-            <div className="w-7 h-7 rounded-lg bg-[#fbf3f4] text-[#790a0e] flex items-center justify-center">
-              <DollarSign size={15} />
+            <div className="w-7 h-7 rounded-md bg-[#fbf3f4] text-[#790a0e] flex items-center justify-center">
+              <DollarSign size={14} />
             </div>
           </div>
-          <div className="my-2">
-            <strong className="text-xl font-extrabold text-[#790a0e] block">
+          <div className="my-1.5">
+            <strong className="text-lg font-bold text-[#790a0e] block">
               {currency(stats.stockCostTotal)}
             </strong>
-            <small className="text-[11px] text-[#8c7d7f]">
-              {stats.itemsWithCost} de {products.length} itens com custo
+            <small className="text-[10px] text-[#8c7d7f]">
+              {stats.itemsWithCost} itens avaliados
             </small>
           </div>
-          <div className="pt-2 border-t border-[#f3ecec] text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
-            <TrendingUp size={12} /> Custo avaliado em estoque
+          <div className="pt-1.5 border-t border-[#f3ecec] text-[10px] text-emerald-700 font-medium flex items-center gap-1">
+            <TrendingUp size={11} /> Custo avaliado em estoque
           </div>
         </div>
 
-        {/* KPI 2: Valor Projetado de Venda & Margem */}
-        <div className="bg-white border border-[#e5dcdd] rounded-xl p-4 flex flex-col justify-between shadow-xs">
+        {/* KPI 2: Venda Projetada & Margem */}
+        <div className="bg-white border border-[#e5dcdd] rounded-lg p-3.5 flex flex-col justify-between shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-[#756668] uppercase tracking-wider">
+            <span className="text-[10px] font-bold text-[#756668] uppercase tracking-wider">
               Venda Projetada
             </span>
-            <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center">
-              <TrendingUp size={15} />
+            <div className="w-7 h-7 rounded-md bg-emerald-50 text-emerald-700 flex items-center justify-center">
+              <TrendingUp size={14} />
             </div>
           </div>
-          <div className="my-2">
-            <strong className="text-xl font-extrabold text-emerald-800 block">
+          <div className="my-1.5">
+            <strong className="text-lg font-bold text-emerald-800 block">
               {currency(stats.stockRetailTotal)}
             </strong>
-            <small className="text-[11px] text-[#8c7d7f]">
-              Margem bruta est.: <b>{stats.projectedMargin.toFixed(1)}%</b>
+            <small className="text-[10px] text-[#8c7d7f]">
+              Margem bruta: <b>{stats.projectedMargin.toFixed(1)}%</b>
             </small>
           </div>
-          <div className="pt-2 border-t border-[#f3ecec] text-[10px] text-[#756668] font-medium">
+          <div className="pt-1.5 border-t border-[#f3ecec] text-[10px] text-[#756668]">
             Potencial de faturamento
           </div>
         </div>
 
-        {/* KPI 3: Volume Físico Total */}
-        <div className="bg-white border border-[#e5dcdd] rounded-xl p-4 flex flex-col justify-between shadow-xs">
+        {/* KPI 3: Catálogo Mestre */}
+        <div className="bg-white border border-[#e5dcdd] rounded-lg p-3.5 flex flex-col justify-between shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-[#756668] uppercase tracking-wider">
-              Unidades Físicas
+            <span className="text-[10px] font-bold text-[#756668] uppercase tracking-wider">
+              Catálogo Ativo
             </span>
-            <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center">
-              <Boxes size={15} />
+            <div className="w-7 h-7 rounded-md bg-purple-50 text-purple-700 flex items-center justify-center">
+              <Boxes size={14} />
             </div>
           </div>
-          <div className="my-2">
-            <strong className="text-2xl font-extrabold text-[#211718] block">
-              {stats.totalPhysicalUnits.toLocaleString("pt-BR")}
+          <div className="my-1.5">
+            <strong className="text-lg font-bold text-[#211718] block">
+              {products.length.toLocaleString("pt-BR")} itens
             </strong>
-            <small className="text-[11px] text-[#8c7d7f]">
-              Peças, metros e barras
+            <small className="text-[10px] text-[#8c7d7f]">
+              {suppliers.length} fornecedores parceiros
             </small>
           </div>
-          <div className="pt-2 border-t border-[#f3ecec] text-[10px] text-blue-700 font-medium">
-            Volume total inventariado
+          <div className="pt-1.5 border-t border-[#f3ecec] text-[10px] text-purple-700 font-medium">
+            {stats.totalPhysicalUnits.toLocaleString("pt-BR")} unidades físicas
           </div>
         </div>
 
-        {/* KPI 4: Catálogo Mestre */}
-        <div className="bg-white border border-[#e5dcdd] rounded-xl p-4 flex flex-col justify-between shadow-xs">
+        {/* KPI 4: Fluxo de Pedidos */}
+        <div className="bg-white border border-[#e5dcdd] rounded-lg p-3.5 flex flex-col justify-between shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-[#756668] uppercase tracking-wider">
-              Catálogo Mestre
-            </span>
-            <div className="w-7 h-7 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center">
-              <Building2 size={15} />
-            </div>
-          </div>
-          <div className="my-2">
-            <strong className="text-2xl font-extrabold text-[#211718] block">
-              {products.length.toLocaleString("pt-BR")}
-            </strong>
-            <small className="text-[11px] text-[#8c7d7f]">
-              {suppliers.length} fornecedores · {stats.brandsCount} marcas
-            </small>
-          </div>
-          <div className="pt-2 border-t border-[#f3ecec] text-[10px] text-purple-700 font-medium">
-            Base unificada ativa
-          </div>
-        </div>
-
-        {/* KPI 5: Ruptura & Estoque Crítico */}
-        <div className="bg-white border border-[#e5dcdd] rounded-xl p-4 flex flex-col justify-between shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-[#756668] uppercase tracking-wider">
-              Ruptura / Alerta
-            </span>
-            <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center">
-              <AlertTriangle size={15} />
-            </div>
-          </div>
-          <div className="my-2">
-            <strong className="text-2xl font-extrabold text-amber-700 block">
-              {stats.zeroStockCount}
-            </strong>
-            <small className="text-[11px] text-[#8c7d7f]">
-              {stats.lowStockCount} itens com estoque baixo (≤ 5)
-            </small>
-          </div>
-          <div className="pt-2 border-t border-[#f3ecec] text-[10px] text-amber-800 font-medium">
-            Necessitam reposição
-          </div>
-        </div>
-
-        {/* KPI 6: Pedidos & Fulfillment */}
-        <div className="bg-white border border-[#e5dcdd] rounded-xl p-4 flex flex-col justify-between shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-[#756668] uppercase tracking-wider">
+            <span className="text-[10px] font-bold text-[#756668] uppercase tracking-wider">
               Fluxo de Pedidos
             </span>
-            <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center">
-              <Truck size={15} />
+            <div className="w-7 h-7 rounded-md bg-blue-50 text-blue-700 flex items-center justify-center">
+              <Truck size={14} />
             </div>
           </div>
-          <div className="my-2">
-            <strong className="text-2xl font-extrabold text-[#211718] block">
-              {orders.length}
+          <div className="my-1.5">
+            <strong className="text-lg font-bold text-[#211718] block">
+              {orders.length} pedidos
             </strong>
-            <small className="text-[11px] text-[#8c7d7f]">
+            <small className="text-[10px] text-[#8c7d7f]">
               {stats.inTransitOrdersCount} em andamento · {stats.deliveredOrdersCount} entregues
             </small>
           </div>
-          <div className="pt-2 border-t border-[#f3ecec] text-[10px] text-emerald-700 font-semibold">
+          <div className="pt-1.5 border-t border-[#f3ecec] text-[10px] text-blue-700 font-medium">
             {stats.completedOrdersCount} finalizados
           </div>
         </div>
       </div>
 
-      {/* Main Grid: Analytical Breakdown Cards */}
-      {(access?.role === "ADMIN_CD" || access?.role === "SUPER_ADMIN") && (
-        <section className="panel bg-white border border-[#e5dcdd] rounded-xl p-5 shadow-xs mb-6">
-          <h2 className="text-base font-bold text-[#211718] mb-4">Painel Kanban (ADMIN CD)</h2>
+      {/* Clean Tab Selector */}
+      <div className="flex items-center gap-1.5 p-1 bg-[#ebe5e6] rounded-lg w-fit mb-4 text-xs font-semibold">
+        <button
+          type="button"
+          onClick={() => setDashboardTab("overview")}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
+            dashboardTab === "overview"
+              ? "bg-white text-[#790a0e] shadow-xs font-bold"
+              : "text-[#5c4e50] hover:text-[#211718]"
+          }`}
+        >
+          <BarChart3 size={14} />
+          <span>Painel & Vendas por Categoria</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setDashboardTab("kanban")}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
+            dashboardTab === "kanban"
+              ? "bg-white text-[#790a0e] shadow-xs font-bold"
+              : "text-[#5c4e50] hover:text-[#211718]"
+          }`}
+        >
+          <Truck size={14} />
+          <span>Fluxo de Expedição (Kanban)</span>
+          <span className="px-1.5 py-0.2 bg-[#f4e9ea] text-[#790a0e] rounded-full text-[10px]">
+            {orders.length}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setDashboardTab("inventory")}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
+            dashboardTab === "inventory"
+              ? "bg-white text-[#790a0e] shadow-xs font-bold"
+              : "text-[#5c4e50] hover:text-[#211718]"
+          }`}
+        >
+          <Boxes size={14} />
+          <span>Fornecedores & Auditoria</span>
+        </button>
+      </div>
+
+      {/* Tab 2: Kanban View */}
+      {dashboardTab === "kanban" && (
+        <section className="panel bg-white border border-[#e5dcdd] rounded-xl p-4 shadow-xs mb-6">
+          <div className="flex items-center justify-between mb-3 pb-2 border-b border-[#eee6e7]">
+            <h2 className="text-sm font-bold text-[#211718]">Fluxo Operacional de Pedidos (Kanban)</h2>
+            <span className="text-xs text-[#7d6e70]">{orders.length} pedidos rastreados</span>
+          </div>
           <KanbanModule orders={orders} onRefresh={handleRefreshOrders} />
         </section>
       )}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
+
+      {/* Tab 1: Overview with Category Sales Chart */}
+      {dashboardTab === "overview" && (
+        <div className="mb-4">
+          <CategorySalesChart
+            orders={orders}
+            products={products}
+            onNavigateToOrders={() => handleNavigate("order", "history")}
+            onOpenNewOrder={onOpenErpOrderModal || (() => handleNavigate("order", "compose"))}
+          />
+        </div>
+      )}
+
+      {/* Tab 3: Inventory Breakdown Panels */}
+      {dashboardTab === "inventory" && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
         {/* Panel 1: Presença e Valoração por Fornecedor */}
         <div className="panel bg-white border border-[#e5dcdd] rounded-xl p-5 shadow-xs">
           <div className="panel-heading flex items-center justify-between pb-3 border-b border-[#eee6e7] mb-3">
@@ -598,9 +620,11 @@ export function GlobalSystemDashboard({
           </div>
         </div>
       </div>
+      )}
 
       {/* Secondary Grid: Alertas de Reposição & Atividades Recentes */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      {(dashboardTab === "overview" || dashboardTab === "inventory") && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Alertas Críticos de Reposição */}
         <div className="panel bg-white border border-[#e5dcdd] rounded-xl p-5 shadow-xs">
           <div className="panel-heading flex items-center justify-between pb-3 border-b border-[#eee6e7] mb-3">
@@ -747,6 +771,7 @@ export function GlobalSystemDashboard({
           )}
         </div>
       </div>
+      )}
     </section>
   );
 }
