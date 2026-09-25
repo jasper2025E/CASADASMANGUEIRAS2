@@ -243,17 +243,22 @@ export function ErpOrderModal({
 
   // Filter products for dropdown lookup
   const searchResults = useMemo(() => {
-    if (!quickSearchQuery.trim()) return products.slice(0, 15);
-    const q = quickSearchQuery.toLowerCase();
+    if (!quickSearchQuery.trim()) return products.slice(0, 30);
+    const q = quickSearchQuery
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+    const tokens = q.split(/\s+/).filter(Boolean);
     return products
-      .filter(
-        (p) =>
-          p.description.toLowerCase().includes(q) ||
-          (p.code && p.code.toLowerCase().includes(q)) ||
-          (p.barcode && p.barcode.toLowerCase().includes(q)) ||
-          p.supplier.toLowerCase().includes(q)
-      )
-      .slice(0, 20);
+      .filter((p) => {
+        const text = `${p.description} ${p.code || ""} ${p.barcode || ""} ${p.supplier} ${p.brand || ""} ${p.category || ""}`
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "");
+        return tokens.every((tok) => text.includes(tok));
+      })
+      .slice(0, 50);
   }, [products, quickSearchQuery]);
 
   // Order Totals
@@ -470,18 +475,47 @@ export function ErpOrderModal({
                       </button>
                     </div>
 
-                    <div
-                      onClick={() => setShowProductSearchDropdown(true)}
-                      className={`w-full h-10 px-3 rounded-lg border flex items-center justify-between cursor-pointer text-xs transition ${
-                        selectedProduct
-                          ? "bg-[#fdf8f8] border-[#e2b8bb] text-[#1e293b] font-semibold"
-                          : "bg-[#f8fafc] border-[#cbd5e1] text-[#94a3b8]"
-                      }`}
-                    >
-                      <span className="truncate">
-                        {selectedProduct ? selectedProduct.description : "Clique para buscar no catálogo..."}
-                      </span>
-                      <ChevronDown size={14} className="shrink-0 text-[#64748b]" />
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={selectedProduct ? selectedProduct.description : quickSearchQuery}
+                        onChange={(e) => {
+                          setSelectedProduct(null);
+                          setQuickSearchQuery(e.target.value);
+                          setShowProductSearchDropdown(true);
+                        }}
+                        onFocus={() => setShowProductSearchDropdown(true)}
+                        placeholder="Digite o nome do produto ou F2..."
+                        className={`w-full h-10 pl-3 pr-8 rounded-lg border text-xs font-semibold transition outline-none ${
+                          selectedProduct
+                            ? "bg-[#fdf8f8] border-[#e2b8bb] text-[#1e293b]"
+                            : "bg-[#f8fafc] border-[#cbd5e1] text-[#1e293b] focus:bg-white focus:border-[#790a0e] focus:ring-1 focus:ring-[#790a0e]"
+                        }`}
+                      />
+                      {selectedProduct ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedProduct(null);
+                            setQuickSearchQuery("");
+                            setItemUnitPrice(0);
+                            setBarcodeInput("");
+                          }}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8c7e80] hover:text-[#1e293b] p-1 cursor-pointer"
+                          title="Limpar produto selecionado"
+                        >
+                          <X size={14} />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setShowProductSearchDropdown(!showProductSearchDropdown)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-[#64748b] hover:text-[#1e293b] p-1 cursor-pointer"
+                          tabIndex={-1}
+                        >
+                          <ChevronDown size={14} />
+                        </button>
+                      )}
                     </div>
 
                     {/* Dropdown de Busca de Produtos */}

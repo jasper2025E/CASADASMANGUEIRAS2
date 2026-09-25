@@ -25,6 +25,9 @@ import {
   ClipboardList,
   PlusCircle,
   ArrowRight,
+  Search,
+  X,
+  Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -106,6 +109,8 @@ interface OrdersModuleProps {
   repeatOrder: (order: Order) => void;
   updateOrderStage: (orderId: string, stage: FulfillmentStage) => void;
   onOpenErpModal?: (order?: Order) => void;
+  searchTerm?: string;
+  setSearchTerm?: (term: string) => void;
 }
 
 const supplierColors: Record<string, string> = {
@@ -134,7 +139,7 @@ export function OrdersModule({
   setQuantity,
   selectedItems,
   totalUnits,
-  filtered,
+  filtered: _filtered,
   onlySelected,
   setOnlySelected,
   savingOrder,
@@ -147,12 +152,100 @@ export function OrdersModule({
   repeatOrder,
   updateOrderStage,
   onOpenErpModal,
+  searchTerm,
+  setSearchTerm,
 }: OrdersModuleProps) {
   const [selectedOrderForModal, setSelectedOrderForModal] = useState<Order | null>(null);
   const [historySearch, setHistorySearch] = useState("");
   const [historyStatusFilter, setHistoryStatusFilter] = useState("Todos");
   const [historyStartDate, setHistoryStartDate] = useState("");
   const [historyEndDate, setHistoryEndDate] = useState("");
+
+  // Product Name Search in Fazer Pedido ("sem ser somente pelo fornecedor")
+  const [localProductSearch, setLocalProductSearch] = useState("");
+  const [searchAllSuppliers, setSearchAllSuppliers] = useState(true);
+  const activeProductSearch = searchTerm !== undefined ? searchTerm : localProductSearch;
+
+  const handleSetProductSearch = React.useCallback(
+    (value: string) => {
+      if (setSearchTerm) setSearchTerm(value);
+      setLocalProductSearch(value);
+    },
+    [setSearchTerm]
+  );
+
+  const normalizeText = React.useCallback((text: string) => {
+    return text
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  }, []);
+
+  // Filter products by product name (description), SKU, brand, barcode, and optional supplier/category
+  const displayProducts = useMemo(() => {
+    const query = normalizeText(activeProductSearch);
+    const tokens = query.split(/\s+/).filter(Boolean);
+
+    return products.filter((p) => {
+      // "Somente adicionados" filter
+      if (onlySelected && (quantities[p.id] || 0) <= 0) {
+        return false;
+      }
+
+      // Supplier filter:
+      // If a search query is typed and searchAllSuppliers is TRUE, search across all suppliers without restriction!
+      // Otherwise, if no query or searchAllSuppliers is FALSE, respect selected supplier.
+      if (supplier !== "Todos") {
+        if (!query || !searchAllSuppliers) {
+          if (p.supplier !== supplier) return false;
+        }
+      }
+
+      // Category filter:
+      if (category !== "Todas" && p.category !== category) {
+        return false;
+      }
+
+      // Match all query tokens against product name / description, SKU code, brand, barcode, supplier, category
+      if (tokens.length > 0) {
+        const searchable = `${normalizeText(p.description)} ${normalizeText(p.code || "")} ${normalizeText(p.brand || "")} ${normalizeText(p.barcode || "")} ${normalizeText(p.supplier || "")} ${normalizeText(p.category || "")}`;
+        if (!tokens.every((t) => searchable.includes(t))) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [products, activeProductSearch, searchAllSuppliers, supplier, category, onlySelected, quantities, normalizeText]);
+
+  // Aggregate matching suppliers when search query is typed
+  const searchStats = useMemo(() => {
+    const query = normalizeText(activeProductSearch);
+    const tokens = query.split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return null;
+
+    const supplierCounts: Record<string, number> = {};
+    let totalMatches = 0;
+
+    products.forEach((p) => {
+      const searchable = `${normalizeText(p.description)} ${normalizeText(p.code || "")} ${normalizeText(p.brand || "")} ${normalizeText(p.barcode || "")} ${normalizeText(p.supplier || "")} ${normalizeText(p.category || "")}`;
+      if (tokens.every((t) => searchable.includes(t))) {
+        totalMatches++;
+        supplierCounts[p.supplier] = (supplierCounts[p.supplier] || 0) + 1;
+      }
+    });
+
+    const inCurrentSupplier = supplier !== "Todos" ? (supplierCounts[supplier] || 0) : totalMatches;
+    const inOtherSuppliers = totalMatches - inCurrentSupplier;
+
+    return {
+      totalMatches,
+      inCurrentSupplier,
+      inOtherSuppliers,
+      supplierCounts,
+    };
+  }, [products, activeProductSearch, supplier, normalizeText]);
 
   const handleSetOrderTab = React.useCallback((tab: OrderSubTab) => setOrderTab(tab), [setOrderTab]);
   const handleSetSupplier = React.useCallback((sup: string) => setSupplier(sup), [setSupplier]);
@@ -288,7 +381,7 @@ export function OrdersModule({
             </div>}
           </div>
 
-          <div className="supplier-selector">
+          <div className="supplier-selector flex-wrap gap-3">
             <div>
               <span>Filtro informativo</span>
               <strong>O destino do pedido é sempre o Centro de Distribuição</strong>
@@ -300,6 +393,9 @@ export function OrdersModule({
                 onChange={(e) => {
                   handleSetSupplier(e.target.value);
                   handleSetCategory("Todas");
+                  if (e.target.value !== "Todos") {
+                    setSearchAllSuppliers(false);
+                  }
                 }}
               >
                 <option>Todos</option>{suppliers.map((name) => (
@@ -308,17 +404,162 @@ export function OrdersModule({
               </select>
               <ChevronDown size={15} />
             </div>
-            <Badge variant="secondary">
-              {products.filter((p) => supplier === "Todos" || p.supplier === supplier).length.toLocaleString("pt-BR")} produtos
+            {supplier !== "Todos" && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  handleSetSupplier("Todos");
+                  setSearchAllSuppliers(true);
+                }}
+                className="text-xs text-[#790a0e] hover:bg-[#f6e8ea] h-8 px-2.5 font-bold cursor-pointer"
+              >
+                <Globe size={13} className="mr-1.5" /> Ver todos os fornecedores
+              </Button>
+            )}
+            <Badge variant="secondary" className="ml-auto">
+              {products.filter((p) => supplier === "Todos" || p.supplier === supplier).length.toLocaleString("pt-BR")} produtos cadastrados
             </Badge>
           </div>
 
           <div className="order-layout">
             <div className="catalog-card">
+              {/* Product Search & Scope Bar - Permite buscar pelo nome do produto sem se limitar ao fornecedor */}
+              <div className="p-3.5 bg-gradient-to-b from-[#faf6f6] to-white border-b border-[#eee6e7] flex flex-col gap-2.5">
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Search input for product name */}
+                  <div className="relative flex-1 min-w-[280px]">
+                    <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#790a0e]" />
+                    <input
+                      type="text"
+                      value={activeProductSearch}
+                      onChange={(e) => handleSetProductSearch(e.target.value)}
+                      placeholder="Pesquisar produto pelo nome, código SKU, marca ou especificação..."
+                      className="w-full h-10 pl-9 pr-9 bg-white border border-[#d8cbcd] rounded-lg text-xs font-semibold text-[#211718] placeholder:text-[#8c7e80] focus:border-[#790a0e] focus:ring-1 focus:ring-[#790a0e] outline-none shadow-2xs transition"
+                    />
+                    {activeProductSearch && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetProductSearch("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8c7e80] hover:text-[#211718] p-1 rounded cursor-pointer"
+                        title="Limpar pesquisa"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Search scope switch */}
+                  <div className="flex items-center gap-1 bg-[#ede6e7] p-1 rounded-lg shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setSearchAllSuppliers(true)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
+                        searchAllSuppliers || supplier === "Todos"
+                          ? "bg-white text-[#790a0e] shadow-xs"
+                          : "text-[#5c4e50] hover:text-[#211718]"
+                      }`}
+                      title="Buscar produtos em todos os fornecedores cadastrados"
+                    >
+                      <Globe size={13} />
+                      <span>Todos os fornecedores</span>
+                    </button>
+
+                    {supplier !== "Todos" && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchAllSuppliers(false)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
+                          !searchAllSuppliers
+                            ? "bg-white text-[#790a0e] shadow-xs"
+                            : "text-[#5c4e50] hover:text-[#211718]"
+                        }`}
+                        title={`Restringir ao fornecedor ${supplier}`}
+                      >
+                        <Boxes size={13} />
+                        <span>Apenas {supplier}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Search stats and supplier pills */}
+                {searchStats && searchStats.totalMatches > 0 && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#f0e4e5] text-xs">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-[#7a6c6e]">
+                        {searchStats.totalMatches} produto{searchStats.totalMatches > 1 ? "s" : ""} encontrado{searchStats.totalMatches > 1 ? "s" : ""}:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchAllSuppliers(true);
+                          handleSetSupplier("Todos");
+                        }}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold transition cursor-pointer ${
+                          searchAllSuppliers || supplier === "Todos"
+                            ? "bg-[#790a0e] text-white"
+                            : "bg-[#f4eded] text-[#5c4e50] hover:bg-[#e8dedf] border border-[#e0d6d7]"
+                        }`}
+                      >
+                        <span>Todos os fornecedores</span>
+                        <span className={`px-1 py-0.2 rounded-full text-[9px] font-black ${searchAllSuppliers || supplier === "Todos" ? "bg-white/20 text-white" : "bg-black/5 text-[#790a0e]"}`}>
+                          {searchStats.totalMatches}
+                        </span>
+                      </button>
+                      {Object.entries(searchStats.supplierCounts).map(([supName, count]) => {
+                        const isSelectedSupplier = supplier === supName && !searchAllSuppliers;
+                        return (
+                          <button
+                            key={supName}
+                            type="button"
+                            onClick={() => {
+                              handleSetSupplier(supName);
+                              setSearchAllSuppliers(false);
+                            }}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold transition cursor-pointer ${
+                              isSelectedSupplier
+                                ? "bg-[#790a0e] text-white"
+                                : "bg-[#f4eded] text-[#5c4e50] hover:bg-[#e8dedf] border border-[#e0d6d7]"
+                            }`}
+                          >
+                            <span>{supName}</span>
+                            <span className={`px-1 py-0.2 rounded-full text-[9px] font-black ${isSelectedSupplier ? "bg-white/20 text-white" : "bg-black/5 text-[#790a0e]"}`}>
+                              {count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {supplier !== "Todos" && !searchAllSuppliers && searchStats.inOtherSuppliers > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchAllSuppliers(true);
+                          handleSetSupplier("Todos");
+                        }}
+                        className="text-[11px] font-bold text-[#790a0e] hover:underline flex items-center gap-1 cursor-pointer bg-[#fdf2f3] px-2 py-0.5 rounded border border-[#f5c6cb]"
+                      >
+                        <Globe size={12} />
+                        <span>Ver +{searchStats.inOtherSuppliers} em outros fornecedores</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="catalog-toolbar">
                 <div>
-                  <h2>{supplier === "Todos" ? "Todos os produtos" : `Produtos de ${supplier}`}</h2>
-                  <span>{filtered.length} produtos encontrados</span>
+                  <h2>
+                    {activeProductSearch.trim()
+                      ? (searchAllSuppliers || supplier === "Todos"
+                          ? `Resultados para "${activeProductSearch}" (Todos os Fornecedores)`
+                          : `Resultados para "${activeProductSearch}" em ${supplier}`)
+                      : (supplier === "Todos" ? "Todos os produtos" : `Produtos de ${supplier}`)}
+                  </h2>
+                  <span>{displayProducts.length} produtos encontrados</span>
                 </div>
                 <div className="filters">
                   <div className="select-wrap">
@@ -349,98 +590,148 @@ export function OrdersModule({
               </div>
 
               <div className="product-list" style={{ height: "600px", width: "100%" }}>
-                <AutoSizer>
-                  {({ height, width }: { height: number; width: number }) => (
-                    <div style={{ height, width, overflowY: "auto" }}>
-                      {filtered.map((product) => {
-                        const quantity = quantities[product.id] || 0;
-                        return (
-                          <article
-                            className={`product-row ${quantity > 0 ? "has-quantity" : ""}`}
-                            key={product.id}
-                          >
-                            <div className="product-main">
-                              <button
-                                className="product-image"
-                                onClick={() => {
-                                  handleSetProductModal(product);
-                                  handleSetProductModalTab("dados");
-                                }}
-                                aria-label={`Editar ${product.description}`}
-                              >
-                                {product.image ? (
-                                  <Image
-                                    src={product.image}
-                                    alt={product.description}
-                                    width={48}
-                                    height={48}
-                                    className="w-full h-full object-cover rounded"
-                                  />
-                                ) : (
-                                  <PackagePlus size={25} />
-                                )}
-                              </button>
-                              <div>
-                                <div className="product-meta flex items-center justify-between gap-2">
-                                  <span>{product.code || product.category}</span>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleSetProductModal(product);
-                                      handleSetProductModalTab("codigo");
-                                    }}
-                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#f6e8ea] text-[#790a0e] hover:bg-[#eed5d8] border border-[#eed5d8] transition cursor-pointer"
-                                    title="Código de barras EAN-13"
-                                  >
-                                    <Barcode size={12} />
-                                    <span>EAN‑13</span>
-                                  </button>
-                                </div>
-                                <strong>{product.description}</strong>
-                                <span>
-                                  {product.category} · unidade: {product.unit}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="stock">
-                              <strong>{product.stock}</strong>
-                              <span>{product.unit}</span>
-                            </div>
-
-                            <div className="quantity-control">
-                              <button
-                                onClick={() => handleSetQuantity(product.id, quantity - 1)}
-                                disabled={quantity === 0}
-                                aria-label="Diminuir"
-                              >
-                                <Minus size={16} />
-                              </button>
-                              <input
-                                aria-label={`Quantidade de ${product.description}`}
-                                type="number"
-                                min="0"
-                                value={quantity || ""}
-                                placeholder="0"
-                                onChange={(e) =>
-                                  handleSetQuantity(product.id, Number(e.target.value))
-                                }
-                              />
-                              <button
-                                onClick={() => handleSetQuantity(product.id, quantity + 1)}
-                                aria-label="Aumentar"
-                              >
-                                <Plus size={16} />
-                              </button>
-                              <span>{product.unit}</span>
-                            </div>
-                          </article>
-                        );
-                      })}
+                {displayProducts.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center p-12 text-center text-[#7a6c6e] h-full">
+                    <div className="w-12 h-12 rounded-full bg-[#f6e8ea] text-[#790a0e] flex items-center justify-center mb-3">
+                      <Search size={22} />
                     </div>
-                  )}
-                </AutoSizer>
+                    <strong className="text-base text-[#211718] mb-1">
+                      Nenhum produto encontrado
+                    </strong>
+                    <p className="text-xs text-[#7a6c6e] max-w-md mb-4">
+                      {activeProductSearch
+                        ? `Não encontramos nenhum item correspondente a "${activeProductSearch}"${supplier !== "Todos" && !searchAllSuppliers ? ` no fornecedor ${supplier}` : ""}.`
+                        : "Nenhum produto disponível com os filtros atuais."}
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      {supplier !== "Todos" && !searchAllSuppliers && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => {
+                            setSearchAllSuppliers(true);
+                            handleSetSupplier("Todos");
+                          }}
+                          className="bg-[#790a0e] hover:bg-[#600609] text-white text-xs font-bold"
+                        >
+                          <Globe size={14} className="mr-1.5" /> Buscar em todos os fornecedores
+                        </Button>
+                      )}
+                      {activeProductSearch && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleSetProductSearch("")}
+                          className="text-xs font-bold"
+                        >
+                          <X size={14} className="mr-1.5" /> Limpar pesquisa
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <AutoSizer>
+                    {({ height, width }: { height: number; width: number }) => (
+                      <div style={{ height, width, overflowY: "auto" }}>
+                        {displayProducts.map((product) => {
+                          const quantity = quantities[product.id] || 0;
+                          return (
+                            <article
+                              className={`product-row ${quantity > 0 ? "has-quantity" : ""}`}
+                              key={product.id}
+                            >
+                              <div className="product-main">
+                                <button
+                                  className="product-image"
+                                  onClick={() => {
+                                    handleSetProductModal(product);
+                                    handleSetProductModalTab("dados");
+                                  }}
+                                  aria-label={`Editar ${product.description}`}
+                                >
+                                  {product.image ? (
+                                    <Image
+                                      src={product.image}
+                                      alt={product.description}
+                                      width={48}
+                                      height={48}
+                                      className="w-full h-full object-cover rounded"
+                                    />
+                                  ) : (
+                                    <PackagePlus size={25} />
+                                  )}
+                                </button>
+                                <div>
+                                  <div className="product-meta flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-mono text-xs">{product.code || product.category}</span>
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#ede6e7] text-[#4a3b3d] border border-[#ded5d6]">
+                                        <Boxes size={10} className="text-[#790a0e]" />
+                                        {product.supplier}
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleSetProductModal(product);
+                                        handleSetProductModalTab("codigo");
+                                      }}
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#f6e8ea] text-[#790a0e] hover:bg-[#eed5d8] border border-[#eed5d8] transition cursor-pointer"
+                                      title="Código de barras EAN-13"
+                                    >
+                                      <Barcode size={12} />
+                                      <span>EAN‑13</span>
+                                    </button>
+                                  </div>
+                                  <strong className="text-sm font-bold text-[#1e293b] leading-tight block mt-0.5">
+                                    {product.description}
+                                  </strong>
+                                  <span className="text-xs text-[#64748b]">
+                                    {product.category} · unidade: {product.unit} {product.brand ? `· marca: ${product.brand}` : ""}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="stock">
+                                <strong>{product.stock}</strong>
+                                <span>{product.unit}</span>
+                              </div>
+
+                              <div className="quantity-control">
+                                <button
+                                  onClick={() => handleSetQuantity(product.id, quantity - 1)}
+                                  disabled={quantity === 0}
+                                  aria-label="Diminuir"
+                                >
+                                  <Minus size={16} />
+                                </button>
+                                <input
+                                  aria-label={`Quantidade de ${product.description}`}
+                                  type="number"
+                                  min="0"
+                                  value={quantity || ""}
+                                  placeholder="0"
+                                  onChange={(e) =>
+                                    handleSetQuantity(product.id, Number(e.target.value))
+                                  }
+                                />
+                                <button
+                                  onClick={() => handleSetQuantity(product.id, quantity + 1)}
+                                  aria-label="Aumentar"
+                                >
+                                  <Plus size={16} />
+                                </button>
+                                <span>{product.unit}</span>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </AutoSizer>
+                )}
               </div>
             </div>
 

@@ -728,6 +728,8 @@ export default function Home() {
             setErpModalInitialOrder(targetOrder || null);
             setErpModalOpen(true);
           }}
+          searchTerm={search}
+          setSearchTerm={setSearch}
         />
       )}
 
