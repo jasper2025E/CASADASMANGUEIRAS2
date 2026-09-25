@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Barcode, Boxes, ChevronDown, ClipboardCheck, FileSpreadsheet, LayoutDashboard, Menu, PackagePlus, Plus, RotateCcw, Search, Settings, ShoppingCart, Upload, Zap, LayoutGrid, Table, LogOut } from "lucide-react";
+import { Barcode, Boxes, ChevronDown, ClipboardCheck, FileSpreadsheet, LayoutDashboard, Menu, PackagePlus, Plus, Search, Settings, ShoppingCart, Upload, Zap, LayoutGrid, Table, LogOut } from "lucide-react";
 import productsSeed from "@/lib/initial-products.json";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import { BalanceModule } from "@/components/balance-module";
 import { AuthScreen } from "@/components/auth-screen";
 import { SettingsModule } from "@/components/settings-module";
 import { ProductBarcode } from "@/components/product-barcode";
-import { normalizeFulfillmentStage, FULFILLMENT_STAGES, type FulfillmentStage } from "@/components/order-progress";
+import { FULFILLMENT_STAGES, type FulfillmentStage } from "@/components/order-progress";
 import { GlobalSystemDashboard } from "@/components/global-system-dashboard";
 import { OrdersModule, type OrderSubTab } from "@/components/orders-module";
 import { ErpOrderModal } from "@/components/erp-order-modal";
@@ -35,7 +35,7 @@ export type Order = {
   originOrganizationName?: string;
   destinationOrganizationName?: string;
   reviewMessage?: string;
-  items: Array<Product & { quantity: number }>;
+  items: Array<Product & { quantity: number; orderItemId?: string }>;
 };
 type ImportPreview = { fileName: string; rows: number; duplicates: number; invalid: number; products: Product[] };
 
@@ -53,39 +53,20 @@ const fromCloudProduct = (product: Record<string, unknown>): Product => ({ id:St
 
 function openCatalogDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    if (typeof window === "undefined" || !window.indexedDB) return reject(new Error("No IndexedDB"));
-    const timer = setTimeout(() => reject(new Error("IndexedDB timeout")), 800);
+    if (typeof window === "undefined" || !window.indexedDB) return reject(new Error("IndexedDB indisponível"));
+    const timer=setTimeout(()=>reject(new Error("IndexedDB timeout")),800);
     const request = indexedDB.open("central-pedido", 1);
     request.onupgradeneeded = () => request.result.createObjectStore("catalog");
-    request.onsuccess = () => { clearTimeout(timer); resolve(request.result); };
-    request.onerror = () => { clearTimeout(timer); reject(request.error); };
+    request.onsuccess = () => { clearTimeout(timer);resolve(request.result); };
+    request.onerror = () => { clearTimeout(timer);reject(request.error); };
   });
 }
-async function loadCatalog(): Promise<Product[] | null> {
+async function persistCatalog(products: Product[], organizationId: string | null) {
+  if (!organizationId) return;
   try {
     const db = await openCatalogDb();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction("catalog", "readonly");
-      const req = tx.objectStore("catalog").get("products");
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return null;
-  }
-}
-async function persistCatalog(products: Product[]) {
-  try {
-    const db = await openCatalogDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction("catalog", "readwrite");
-      tx.objectStore("catalog").put(products, "products");
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch {
-    // Ignore IndexedDB write failure on restricted browsers
-  }
+    await new Promise<void>((resolve, reject) => { const tx = db.transaction("catalog", "readwrite"); tx.objectStore("catalog").put(products, `products:${organizationId}`); tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+  } catch { /* Cache local é opcional. */ }
 }
 
 export default function Home() {
@@ -97,10 +78,7 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Todas");
   const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const [orders, setOrders] = useState<Order[]>(() => {
-    if (typeof window === "undefined") return [];
-    try { return JSON.parse(localStorage.getItem("pedido-central-orders") || "[]") as Order[]; } catch { return []; }
-  });
+  const [orders, setOrders] = useState<Order[]>([]);
   const [onlySelected, setOnlySelected] = useState(false);
   const [productModal, setProductModal] = useState<Product | null>(null);
   const [productModalTab, setProductModalTab] = useState<"dados" | "codigo">("dados");
@@ -162,91 +140,24 @@ export default function Home() {
     };
 
     try {
-      if (organizationId && destinationOrganizationId && user) {
-        const { data: saved, error } = await supabase.from("purchase_orders").insert({
-          organization_id: organizationId,
-          destination_organization_id: destinationOrganizationId,
-          order_number: order.id,
-          supplier: order.supplier,
-          status,
-          distribution_status: status === "Finalizado" ? "submitted" : "draft",
-          created_by: user.id,
-        }).select("id").single();
-        if (error || !saved) throw error || new Error("Erro ao salvar pedido no banco");
-        order.dbId = saved.id;
-        const { error: itemError } = await supabase.from("purchase_order_items").insert(
-          orderData.items.map((item) => ({
-            order_id: saved.id,
-            product_id: item.id,
-            quantity: item.quantity,
-            unit: item.unit,
-          }))
-        );
-        if (itemError) {
-          await supabase.from("purchase_orders").delete().eq("id", saved.id);
-          throw itemError;
-        }
+      if (status === "Finalizado") {
+        const { data: savedId, error } = await supabase.rpc("criar_pedido_transferencia", {
+          p_itens: orderData.items.map((item) => ({ product_id:item.id, qtd:item.quantity })),
+          p_observacao: orderData.notes || "",
+        });
+        if (error || !savedId) throw error || new Error("Erro ao enviar pedido ao CD");
+        order.dbId = String(savedId);
       }
 
       const updated = [order, ...orders.filter((o) => o.id !== order.id)];
       setOrders(updated);
-      localStorage.setItem("pedido-central-orders", JSON.stringify(updated));
       toast.success(status === "Finalizado" ? "Pedido emitido com sucesso!" : "Rascunho de pedido salvo.");
     } catch {
       toast.error("Não foi possível salvar o pedido. Tente novamente.");
     }
   }
 
-  function handleDirectAccess() {
-    const localUser = {
-      id: "operador-cdm",
-      email: "operador@casadasmangueiras.com",
-      user_metadata: { name: "Operador CDM" },
-      app_metadata: {},
-      aud: "authenticated",
-      created_at: new Date().toISOString(),
-    } as unknown as User;
-    if (typeof window !== "undefined") {
-      localStorage.setItem("cdm-quick-access", "true");
-    }
-    setUser(localUser);
-    setAccess({
-      role: "SUPER_ADMIN",
-      permissions: [
-        "dashboard.view",
-        "orders.view",
-        "orders.create",
-        "orders.edit",
-        "orders.finalize",
-        "orders.delete",
-        "products.view",
-        "products.create",
-        "products.edit",
-        "products.delete",
-        "inventory.view",
-        "inventory.count",
-        "inventory.reconcile",
-        "reports.view",
-        "settings.view",
-        "users.manage",
-      ],
-      active: true,
-    });
-    setOrganizationId("cdm-matriz");
-    setDestinationOrganizationId("cdm-cd");
-    setOrganizationName("Casa das Mangueiras - Matriz");
-    setCloudStatus("Modo Operador Ativo");
-    setAuthLoading(false);
-  }
-
   useEffect(() => {
-    if (typeof window !== "undefined" && localStorage.getItem("cdm-quick-access") === "true") {
-      setTimeout(() => {
-        handleDirectAccess();
-      }, 0);
-      return;
-    }
-
     let resolved = false;
     const timeout = setTimeout(() => {
       if (!resolved) setAuthLoading(false);
@@ -279,113 +190,63 @@ export default function Home() {
 
   useEffect(() => {
     if (!user) return;
-    if (user.id === "operador-cdm") {
-      setTimeout(() => {
-        setCloudStatus("Modo Operador Conectado");
-      }, 0);
-      return;
-    }
     let cancelled = false;
     async function connectCloud() {
       setOrganizationId(null);
       setCloudStatus("Sincronizando dados...");
-      const { data: memberships, error: membershipError } = await supabase.from("organization_members").select("organization_id,role,permissions,active").eq("user_id", user!.id);
-      if (membershipError) { console.error("Falha ao carregar organizações", membershipError); setCloudStatus("Falha na sincronização"); return; }
-      const preferredId = localStorage.getItem("central-active-organization");
-      const activeMemberships = (memberships || []).filter((item) => item.active);
-      let selectedMembership = activeMemberships.find((item) => item.organization_id === preferredId) || activeMemberships[0];
-      let orgId = selectedMembership?.organization_id as string | undefined;
-      if (!orgId && memberships?.length) {
-        setAccess({ role: memberships[0].role, permissions: memberships[0].permissions || [], active: false });
-        setCloudStatus("Acesso suspenso pelo administrador");
+      const { data: rawContext, error: contextError } = await supabase.rpc("get_my_access_context");
+      const context = rawContext as null | { filial_id:string; filial_nome:string; filial_tipo:"branch"|"distribution_center"; cargo:UserAccess["role"]; ativo:boolean; permissions:string[] };
+      if (contextError || !context) {
+        setAccess(null);
+        setCloudStatus("Usuário sem vínculo ativo. Solicite acesso ao administrador.");
         return;
       }
-      if (!orgId) {
-        const { data: existingOrganization } = await supabase.from("organizations").select("id").eq("created_by", user!.id).limit(1).maybeSingle();
-        let organization = existingOrganization;
-        if (!organization) {
-          const result = await supabase.from("organizations").insert({ name: "Casa das Mangueiras", created_by: user!.id }).select("id").single();
-          if (result.error) { setCloudStatus("Falha ao criar a organização"); return; }
-          organization = result.data;
-        }
-        orgId = organization.id;
-        const { error: memberError } = await supabase.from("organization_members").insert({ organization_id: orgId, user_id: user!.id, role: "support" });
-        if (memberError && memberError.code !== "23505") { setCloudStatus("Falha ao autorizar o administrador"); return; }
-        selectedMembership = { organization_id: orgId, role: "support", permissions: [], active: true };
-        const { count } = await supabase.from("inventory_sectors").select("id", { count:"exact", head:true }).eq("organization_id", orgId);
-        if (!count) await supabase.from("inventory_sectors").insert([
-          { organization_id:orgId, name:"Loja / Salão", location:"Área de vendas", owner_name:"", status:"Não iniciado", notes:"" },
-          { organization_id:orgId, name:"Depósito", location:"Estoque interno", owner_name:"", status:"Não iniciado", notes:"" },
-          { organization_id:orgId, name:"Área externa", location:"Pátio", owner_name:"", status:"Não iniciado", notes:"" },
-        ]);
-      }
-      if (!orgId || cancelled) return;
-      localStorage.setItem("central-active-organization", orgId);
+      const orgId = context.filial_id;
+      if (cancelled) return;
       setOrganizationId(orgId);
-      const resolvedAccess: UserAccess = {
-        role: selectedMembership!.role,
-        permissions: selectedMembership!.permissions || [],
-        active: selectedMembership!.active,
-      };
-      setAccess(resolvedAccess);
-      const { data: organization } = await supabase.from("organizations").select("name,organization_type,parent_organization_id").eq("id", orgId).single();
-      setOrganizationName(organization?.name || "Organização");
-      setDestinationOrganizationId(organization?.parent_organization_id || orgId);
+      setOrganizationName(context.filial_nome);
+      setDestinationOrganizationId(context.filial_tipo === "distribution_center" ? orgId : null);
+      setAccess({ role:context.cargo, permissions:context.permissions || [], active:context.ativo });
       const cloudProducts: Product[] = []; let from = 0;
-      let pageCount = 0;
-      while (pageCount < 10) {
-        pageCount++;
-        const { data, error } = await supabase.from("products").select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url").eq("organization_id", orgId).range(from, from + 999);
+      while (true) {
+        const { data, error } = await supabase.from("products").select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url").eq("catalogo_global", true).range(from, from + 999);
         if (error) { setCloudStatus("Falha ao carregar produtos"); return; }
-        if (data?.length) {
-          cloudProducts.push(...data.map((product) => fromCloudProduct(product)));
-        }
-        if (!data || data.length < 1000) break;
-        from += 1000;
+        cloudProducts.push(...(data || []).map((product) => fromCloudProduct(product)));
+        if (!data || data.length < 1000) break; from += 1000;
       }
-      if (!cloudProducts.length) {
-        setCloudStatus("Enviando catálogo inicial...");
-        for (let index = 0; index < productsSeed.length; index += 400) {
-          const batch = (productsSeed as Product[]).slice(index,index+400).map((p)=>({organization_id:orgId,code:p.code||null,description:p.description,brand:p.brand||"",supplier:p.supplier,category:p.category,unit:p.unit,stock:p.stock,cost:p.cost??null,price:p.price??null,ncm:p.ncm||null,image_url:p.image||null,created_by:user!.id}));
-          const { data, error } = await supabase.from("products").upsert(batch,{onConflict:"organization_id,product_key",ignoreDuplicates:true}).select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url");
-          if (error) { setCloudStatus("Falha ao enviar o catálogo"); return; }
-          cloudProducts.push(...(data || []).map((product) => fromCloudProduct(product)));
-        }
-      }
-      const { data: orderRows, error: ordersError } = await supabase.from("purchase_orders").select("id,organization_id,destination_organization_id,order_number,supplier,status,distribution_status,review_message,created_at,purchase_order_items(quantity,unit,products(id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url))").or(`organization_id.eq.${orgId},destination_organization_id.eq.${orgId}`).order("created_at", { ascending:false }).limit(250);
+      const { data: stockRows } = await supabase.from("estoque").select("product_id,quantidade").eq("filial_id",orgId);
+      const stockByProduct = new Map((stockRows || []).map((row) => [row.product_id,Number(row.quantidade)||0]));
+      cloudProducts.forEach((product) => { product.stock = stockByProduct.get(product.id) ?? 0; });
+      const { data: orderRows, error: ordersError } = await supabase.from("pedidos_transferencia").select("id,numero,filial_id,status,motivo,created_at,organizations!pedidos_transferencia_filial_id_fkey(name),pedidos_transferencia_itens(id,qtd_solicitada,qtd_aprovada,qtd_recebida,products(id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url))").order("created_at", { ascending:false }).limit(250);
       if (ordersError) { setCloudStatus("Produtos sincronizados; falha no histórico"); return; }
+      const stageByStatus: Record<string,FulfillmentStage> = { PENDENTE:"submitted", EM_SEPARACAO:"separating", EM_TRANSITO:"shipped", FINALIZADO:"delivered", NEGADO:"rejected", CANCELADO:"cancelled" };
       const cloudOrders: Order[] = (orderRows || []).map((row) => ({
-        id: row.order_number,
+        id: `PED-${String(row.numero).padStart(6,"0")}`,
         dbId: row.id,
-        supplier: row.supplier,
+        supplier: "Centro de Distribuição",
         createdAt: row.created_at,
-        status: row.status as Order["status"],
-        fulfillmentStage: normalizeFulfillmentStage(row.distribution_status, row.status),
-        originOrganizationId: row.organization_id,
-        destinationOrganizationId: row.destination_organization_id,
-        originOrganizationName: row.organization_id === orgId ? (organization?.name || "Filial") : "Filial solicitante",
+        status: "Finalizado",
+        fulfillmentStage: stageByStatus[row.status] || "submitted",
+        originOrganizationId: row.filial_id,
+        destinationOrganizationId: context.filial_tipo === "distribution_center" ? orgId : undefined,
+        originOrganizationName: (row.organizations as unknown as {name?:string} | null)?.name || "Filial solicitante",
         destinationOrganizationName: "Centro de Distribuição",
-        reviewMessage: row.review_message,
-        items: (row.purchase_order_items || []).flatMap((item) =>
+        reviewMessage: row.motivo,
+        items: (row.pedidos_transferencia_itens || []).flatMap((item) =>
           item.products
-            ? [{ ...fromCloudProduct(item.products as unknown as Record<string, unknown>), quantity: Number(item.quantity) }]
+            ? [{ ...fromCloudProduct(item.products as unknown as Record<string, unknown>), quantity: Number(item.qtd_aprovada ?? item.qtd_solicitada), orderItemId:item.id }]
             : []
         ),
       }));
       if (!cancelled) {
         setProducts(cloudProducts);
         setOrders(cloudOrders);
-        localStorage.setItem("pedido-central-orders", JSON.stringify(cloudOrders));
-        await persistCatalog(cloudProducts);
+        await persistCatalog(cloudProducts,orgId);
         setCloudStatus("Dados sincronizados");
       }
     }
     void connectCloud(); return () => { cancelled = true; };
   }, [user, syncAttempt]);
-
-  useEffect(() => {
-    void loadCatalog().then((catalog) => { if (catalog?.length) setProducts(catalog); });
-  }, []);
 
   useEffect(() => {
     const context = (document as unknown as { modelContext?: { registerTool: (tool: unknown, options?: { signal?: AbortSignal }) => void | Promise<void> } }).modelContext;
@@ -431,15 +292,16 @@ export default function Home() {
       items: selectedItems,
     };
     try {
-      if (organizationId && destinationOrganizationId && user) {
-        const { data: saved, error } = await supabase.from("purchase_orders").insert({ organization_id:organizationId, destination_organization_id:destinationOrganizationId, order_number:order.id, supplier:order.supplier, status, distribution_status: status === "Finalizado" ? "submitted" : "draft", created_by:user.id }).select("id").single();
-        if (error || !saved) throw error || new Error("Pedido não retornado pelo banco");
-        order.dbId = saved.id;
-        const { error: itemError } = await supabase.from("purchase_order_items").insert(selectedItems.map((item)=>({order_id:saved.id,product_id:item.id,quantity:item.quantity,unit:item.unit})));
-        if (itemError) { await supabase.from("purchase_orders").delete().eq("id", saved.id); throw itemError; }
+      if (status === "Finalizado") {
+        const { data:savedId,error } = await supabase.rpc("criar_pedido_transferencia", {
+          p_itens:selectedItems.map((item)=>({product_id:item.id,qtd:item.quantity})),
+          p_observacao:"",
+        });
+        if (error || !savedId) throw error || new Error("Pedido não retornado pelo banco");
+        order.dbId=String(savedId);
       }
       const updated = [order, ...orders];
-      setOrders(updated); localStorage.setItem("pedido-central-orders", JSON.stringify(updated));
+      setOrders(updated);
       toast.success(status === "Finalizado" ? "Pedido enviado ao Centro de Distribuição." : "Rascunho salvo.");
       if (status === "Finalizado") {
         setQuantities({});
@@ -477,7 +339,7 @@ export default function Home() {
       let savedProduct = product;
       if (organizationId) {
         if (creatingProduct) {
-          const { data, error } = await supabase.from("products").insert({ ...payload, organization_id:organizationId, created_by:user?.id }).select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url").single();
+          const { data, error } = await supabase.from("products").insert({ ...payload, organization_id:organizationId, catalogo_global:true, created_by:user?.id }).select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url").single();
           if (error || !data) throw error || new Error("Produto não retornado");
           savedProduct = fromCloudProduct(data);
         } else {
@@ -487,7 +349,7 @@ export default function Home() {
         }
       }
       const updated = creatingProduct ? [savedProduct, ...products] : products.map((item) => item.id === savedProduct.id ? savedProduct : item);
-      setProducts(updated); await persistCatalog(updated); setProductModal(null); setCreatingProduct(false);
+      setProducts(updated); await persistCatalog(updated,organizationId); setProductModal(null); setCreatingProduct(false);
       toast.success(creatingProduct ? "Produto cadastrado." : "Produto atualizado.");
     } catch { toast.error("Não foi possível salvar o produto. Verifique se o código já existe."); }
   }
@@ -524,13 +386,13 @@ export default function Home() {
       const persisted: Product[] = [];
       if (organizationId && user) {
         for(let index=0;index<importPreview.products.length;index+=300){
-          const batch=importPreview.products.slice(index,index+300).map((p)=>({organization_id:organizationId,code:p.code||null,description:p.description,brand:p.brand,supplier:p.supplier,category:p.category,unit:p.unit,stock:p.stock,cost:p.cost??null,price:p.price??null,ncm:p.ncm||null,image_url:p.image,created_by:user.id}));
+          const batch=importPreview.products.slice(index,index+300).map((p)=>({organization_id:organizationId,catalogo_global:true,code:p.code||null,description:p.description,brand:p.brand,supplier:p.supplier,category:p.category,unit:p.unit,stock:p.stock,cost:p.cost??null,price:p.price??null,ncm:p.ncm||null,image_url:p.image,created_by:user.id}));
           const {data,error}=await supabase.from("products").upsert(batch,{onConflict:"organization_id,product_key",ignoreDuplicates:true}).select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,image_url");
           if(error) throw error;
           persisted.push(...(data||[]).map((item)=>fromCloudProduct(item)));
         }
       } else persisted.push(...importPreview.products);
-      const updated = [...products, ...persisted]; setProducts(updated); await persistCatalog(updated);
+      const updated = [...products, ...persisted]; setProducts(updated); await persistCatalog(updated,organizationId);
       toast.success(`${persisted.length.toLocaleString("pt-BR")} produtos importados sem duplicidade.`); setImportOpen(false); setImportPreview(null);
     } catch { toast.error("Não foi possível concluir a importação. O catálogo anterior foi preservado."); }
     finally { setImporting(false); }
@@ -555,12 +417,12 @@ export default function Home() {
   async function removeOrder(order: Order) {
     if (!can(access, "orders.manage")) return void toast.error("Seu perfil não pode excluir pedidos.");
     if (!confirm(`Excluir o pedido ${order.id}?`)) return;
-    if (order.dbId && organizationId) {
-      const { error } = await supabase.from("purchase_orders").delete().eq("id", order.dbId).eq("organization_id", organizationId);
-      if (error) return void toast.error("Não foi possível excluir o pedido.");
+    if (order.dbId) {
+      const { error } = await supabase.rpc("cancelar_pedido_transferencia", { p_id:order.dbId });
+      if (error) return void toast.error(error.message || "Não foi possível cancelar o pedido.");
     }
     const updated = orders.filter((item) => item.id !== order.id);
-    setOrders(updated); localStorage.setItem("pedido-central-orders", JSON.stringify(updated));
+    setOrders(updated);
     toast.success("Pedido excluído.");
   }
 
@@ -570,21 +432,30 @@ export default function Home() {
     if (!target?.dbId) return;
     const message = stage === "rejected" ? window.prompt("Informe o motivo da rejeição para a filial:")?.trim() || "" : "";
     if (stage === "rejected" && message.length < 3) return void toast.error("Informe o motivo da rejeição.");
-    const { error } = await supabase.rpc("transition_distribution_order", { p_order_id:target.dbId, p_status:stage, p_message:message });
+    let error: { message:string } | null = null;
+    if (stage === "rejected") {
+      ({ error } = await supabase.rpc("decidir_pedido", { p_id:target.dbId,p_acao:"NEGAR",p_itens:[],p_motivo:message }));
+    } else if (["received","approved","separating"].includes(stage)) {
+      ({ error } = await supabase.rpc("decidir_pedido", { p_id:target.dbId,p_acao:"APROVAR_TOTAL",p_itens:[],p_motivo:"" }));
+    } else if (stage === "shipped") {
+      const motorista=window.prompt("Nome do motorista:")?.trim() || "";
+      const placa=window.prompt("Placa do veículo:")?.trim() || "";
+      if (!motorista || !placa) return;
+      ({ error } = await supabase.rpc("gerar_romaneio", { p_id:target.dbId,p_motorista:motorista,p_placa:placa,p_saida:new Date().toISOString() }));
+    } else if (stage === "delivered") {
+      ({ error } = await supabase.rpc("confirmar_recebimento", { p_id:target.dbId,p_itens:[],p_obs:"" }));
+    }
     if (error) return void toast.error(error.message.includes("Transição") ? "Siga a próxima etapa do fluxo; não é possível pular etapas." : error.message);
     const updated = orders.map((o) => (o.id === orderId ? { ...o, fulfillmentStage: stage, reviewMessage: message || o.reviewMessage } : o));
-    setOrders(updated); localStorage.setItem("pedido-central-orders", JSON.stringify(updated));
+    setOrders(updated);
     const stageInfo = FULFILLMENT_STAGES.find((s) => s.key === stage);
     toast.success(`Pedido atualizado: ${stageInfo?.label || stage}.`);
   }
 
   if (authLoading) return <main className="auth-page"><div className="auth-loading">Carregando sistema...</div></main>;
-  if (!user) return <AuthScreen onDirectAccess={handleDirectAccess} />;
+  if (!user) return <AuthScreen />;
 
   const handleSignOut = async () => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("cdm-quick-access");
-    }
     await supabase.auth.signOut().catch(() => {});
     setUser(null);
   };
@@ -779,27 +650,12 @@ export default function Home() {
       )}
 
       {view === "settings" && (
-        organizationId ? (
-          <SettingsModule
-            user={user}
-            organizationId={organizationId}
-            onOrganizationChange={() => window.location.reload()}
-          />
-        ) : (
-          <section className="content settings-unavailable">
-            <div className="panel">
-              <Settings size={30} />
-              <div>
-                <span className="eyebrow">CONFIGURAÇÕES</span>
-                <h1>{cloudStatus.startsWith("Falha") ? "Não foi possível carregar agora" : "Preparando sua organização"}</h1>
-                <p>{cloudStatus.startsWith("Falha") ? "A conexão foi interrompida. Tente novamente; seus dados locais continuam preservados." : "Estamos conectando sua conta e preparando os dados da empresa."}</p>
-              </div>
-              <Button onClick={() => setSyncAttempt((attempt) => attempt + 1)} disabled={!cloudStatus.startsWith("Falha")}>
-                <RotateCcw size={16} /> Tentar novamente
-              </Button>
-            </div>
-          </section>
-        )
+        <SettingsModule
+          user={user}
+          organizationId={organizationId || ""}
+          access={access}
+          onOrganizationChange={() => window.location.reload()}
+        />
       )}
     </main>
 

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { Loader2, LockKeyhole, Mail, Eye, EyeOff, AlertCircle, CheckCircle2, ArrowRight, Zap } from "lucide-react";
+import { Loader2, LockKeyhole, Mail, Eye, EyeOff, AlertCircle, CheckCircle2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase, supabaseConfigured } from "@/lib/supabase";
@@ -30,7 +30,7 @@ function translateAuthError(errMessage: string): string {
   return errMessage;
 }
 
-export function AuthScreen({ onDirectAccess }: { onDirectAccess?: () => void }) {
+export function AuthScreen() {
   const [email, setEmail] = useState(() =>
     typeof window === "undefined" ? "" : localStorage.getItem("cdm-login-email") || ""
   );
@@ -161,28 +161,6 @@ export function AuthScreen({ onDirectAccess }: { onDirectAccess?: () => void }) 
         </div>
 
         {/* Form Container */}
-        <div className="mb-4">
-          {onDirectAccess && (
-            <button
-              type="button"
-              onClick={onDirectAccess}
-              className="w-full h-11 rounded-lg bg-[#790a0e] hover:bg-[#600609] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md border border-[#941e23] transition-transform active:scale-[0.99]"
-            >
-              <Zap size={16} className="text-amber-300 fill-amber-300" />
-              <span>ACESSAR SISTEMA DIRETAMENTE (OPERADOR)</span>
-            </button>
-          )}
-          {onDirectAccess && (
-            <div className="flex items-center gap-2 my-3">
-              <div className="h-[1px] bg-white/20 flex-1" />
-              <span className="text-[10px] uppercase tracking-wider text-slate-300 font-semibold">
-                ou entrar com credenciais
-              </span>
-              <div className="h-[1px] bg-white/20 flex-1" />
-            </div>
-          )}
-        </div>
-
         <form onSubmit={submit}>
           <div className="auth-header-mode">
             <h2>{mode === "login" ? "Login Corporativo" : "Novo Cadastro"}</h2>

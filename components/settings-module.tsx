@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Building2, Check, Clipboard, KeyRound, LockKeyhole, LogOut, RefreshCw, ShieldCheck, Trash2, UserCheck, UserRound, Users } from "lucide-react";
+import { Building2, Clipboard, KeyRound, LockKeyhole, RefreshCw, ShieldCheck, UserCheck, UserRound, Users } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,207 +10,110 @@ import { supabase } from "@/lib/supabase";
 import { assignableRoles, can, permissionGroups, roleLabels, rolePresets, type MemberRole, type PermissionKey, type UserAccess } from "@/lib/access";
 import { toast } from "sonner";
 
-type Member = {
-  user_id: string;
-  email: string;
-  full_name: string;
-  role: MemberRole;
-  permissions: string[];
-  active: boolean;
-  created_at: string;
-};
-type Membership = { organization_id: string; role: MemberRole; organizations: { name: string } | null };
+type Member = { user_id:string; email:string; full_name:string; cargo:MemberRole; direitos:string[]; ativo:boolean; created_at:string };
 
-function makeCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
-  return Array.from(bytes, (value) => alphabet[value % alphabet.length]).join("");
-}
+export function SettingsModule({ user, organizationId, access, onOrganizationChange }: { user:User; organizationId:string; access:UserAccess|null; onOrganizationChange:(id:string)=>void }) {
+  const [name,setName]=useState("Casa das Mangueiras");
+  const [members,setMembers]=useState<Member[]>([]);
+  const [inviteCode,setInviteCode]=useState("");
+  const [inviteRole,setInviteRole]=useState<MemberRole>("RECEBEDOR_CONFERENTE");
+  const [joinCode,setJoinCode]=useState("");
+  const [loading,setLoading]=useState(true);
+  const [editing,setEditing]=useState<Member|null>(null);
+  const [draftRole,setDraftRole]=useState<MemberRole>("VENDEDOR");
+  const [draftRights,setDraftRights]=useState<string[]>([]);
+  const [draftActive,setDraftActive]=useState(true);
+  const canManage=can(access,"users.manage");
 
-export function SettingsModule({ user, organizationId, onOrganizationChange }: { user: User; organizationId: string; onOrganizationChange: (id: string) => void }) {
-  const [name, setName] = useState("Casa das Mangueiras");
-  const [members, setMembers] = useState<Member[]>([]);
-  const [memberships, setMemberships] = useState<Membership[]>([]);
-  const [inviteCode, setInviteCode] = useState("");
-  const [inviteRole, setInviteRole] = useState<MemberRole>("checker");
-  const [joinCode, setJoinCode] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draftRole, setDraftRole] = useState<MemberRole>("checker");
-  const [draftPermissions, setDraftPermissions] = useState<string[]>([]);
-  const [draftActive, setDraftActive] = useState(true);
-
-  const currentMember = members.find((member) => member.user_id === user.id);
-  const currentAccess: UserAccess | null = currentMember ? { role: currentMember.role, permissions: currentMember.permissions, active: currentMember.active } : null;
-  const canManageUsers = can(currentAccess, "users.manage");
-  const canManageSettings = can(currentAccess, "settings.manage");
-  const editingMember = members.find((member) => member.user_id === editingId) || null;
-
-  const loadSettings = useCallback(async () => {
+  const load=useCallback(async()=>{
     setLoading(true);
-    const [organizationResult, memberResult, membershipsResult, inviteResult] = await Promise.all([
-      supabase.from("organizations").select("name").eq("id", organizationId).single(),
-      supabase.rpc("list_organization_members", { p_organization_id: organizationId }),
-      supabase.from("organization_members").select("organization_id,role,organizations(name)").eq("user_id", user.id).eq("active", true).order("created_at"),
-      supabase.from("organization_invites").select("code,role,expires_at").eq("organization_id", organizationId).gt("expires_at", new Date().toISOString()).maybeSingle(),
-    ]);
-    if (organizationResult.data) setName(organizationResult.data.name);
-    if (memberResult.data) setMembers(memberResult.data as Member[]);
-    if (membershipsResult.data) setMemberships(membershipsResult.data as unknown as Membership[]);
-    if (inviteResult.data) {
-      setInviteCode(inviteResult.data.code);
-      setInviteRole(inviteResult.data.role as MemberRole);
+    if(organizationId){
+      const organization=await supabase.from("organizations").select("name").eq("id",organizationId).maybeSingle();
+      if(organization.data) setName(organization.data.name);
+    } else setName("Aguardando vínculo");
+    if(canManage || access?.role==="ADMIN_CD" || access?.role==="SUPER_ADMIN"){
+      const result=await supabase.rpc("listar_equipe");
+      if(result.error) toast.error("Não foi possível carregar a equipe.");
+      else setMembers((result.data||[]) as Member[]);
+    } else {
+      const result=await supabase.from("usuarios_filial").select("user_id,cargo,direitos,ativo,created_at").eq("user_id",user.id).maybeSingle();
+      if(result.data) setMembers([{...result.data,email:user.email||"",full_name:String(user.user_metadata?.full_name||"")} as Member]);
     }
     setLoading(false);
-  }, [organizationId, user.id]);
+  },[organizationId,user,canManage,access?.role]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => void loadSettings(), 0);
-    return () => window.clearTimeout(timer);
-  }, [loadSettings]);
+  useEffect(()=>{
+    const timer=window.setTimeout(()=>void load(),0);
+    return ()=>window.clearTimeout(timer);
+  },[load]);
 
-  async function saveOrganization() {
-    const trimmed = name.trim();
-    if (!trimmed) return void toast.error("Informe o nome da organização.");
-    const { error } = await supabase.from("organizations").update({ name: trimmed }).eq("id", organizationId);
-    if (error) return void toast.error("Você não tem autorização para alterar a organização.");
-    toast.success("Nome da organização atualizado.");
+  async function generateInvite(){
+    const {data,error}=await supabase.rpc("criar_convite_filial",{p_cargo:inviteRole,p_direitos:rolePresets[inviteRole]});
+    if(error || !data) return void toast.error(error?.message||"Não foi possível criar o convite.");
+    setInviteCode(String(data)); toast.success(`Convite de ${roleLabels[inviteRole]} criado por 30 dias.`);
+  }
+  async function acceptInvite(){
+    const {data,error}=await supabase.rpc("aceitar_convite_filial",{p_codigo:joinCode.trim().toUpperCase()});
+    if(error || !data) return void toast.error(error?.message||"Código inválido ou expirado.");
+    toast.success("Acesso vinculado à filial."); onOrganizationChange(String(data));
+  }
+  function openEditor(member:Member){ setEditing(member);setDraftRole(member.cargo);setDraftRights(member.direitos||[]);setDraftActive(member.ativo); }
+  function applyRole(role:MemberRole){ setDraftRole(role);setDraftRights([...rolePresets[role]]); }
+  function toggleRight(right:PermissionKey){ setDraftRights(current=>current.includes(right)?current.filter(item=>item!==right):[...current,right]); }
+  async function saveAccess(){
+    if(!editing) return;
+    const {error}=await supabase.rpc("atualizar_usuario_filial",{p_user_id:editing.user_id,p_cargo:draftRole,p_direitos:draftRights,p_ativo:draftActive});
+    if(error) return void toast.error(error.message||"Não foi possível atualizar o acesso.");
+    setEditing(null);toast.success("Acesso atualizado com segurança.");void load();
   }
 
-  async function generateInvite() {
-    const code = makeCode();
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { error } = await supabase.from("organization_invites").upsert({
-      organization_id: organizationId,
-      code,
-      role: inviteRole,
-      permissions: rolePresets[inviteRole],
-      expires_at: expiresAt,
-      created_by: user.id,
-    }, { onConflict: "organization_id" });
-    if (error) return void toast.error("Não foi possível gerar o acesso.");
-    setInviteCode(code);
-    toast.success(`Convite de ${roleLabels[inviteRole]} criado por 30 dias.`);
-  }
-
-  async function copyText(value: string, message: string) {
-    await navigator.clipboard.writeText(value);
-    toast.success(message);
-  }
-
-  async function joinOrganization() {
-    const code = joinCode.trim().toUpperCase();
-    if (!code) return void toast.error("Digite o código recebido.");
-    const { data, error } = await supabase.rpc("accept_organization_invite", { p_code: code });
-    if (error || !data) return void toast.error("Código inválido ou expirado.");
-    localStorage.setItem("central-active-organization", String(data));
-    toast.success("Acesso liberado. Trocando de organização...");
-    onOrganizationChange(String(data));
-  }
-
-  function openAccessEditor(member: Member) {
-    setEditingId(member.user_id);
-    setDraftRole(member.role);
-    setDraftPermissions(member.permissions);
-    setDraftActive(member.active);
-  }
-
-  function applyRole(role: MemberRole) {
-    setDraftRole(role);
-    setDraftPermissions([...rolePresets[role]]);
-  }
-
-  function togglePermission(permission: PermissionKey) {
-    setDraftPermissions((current) => current.includes(permission)
-      ? current.filter((item) => item !== permission)
-      : [...current, permission]);
-  }
-
-  async function saveMemberAccess() {
-    if (!editingMember || editingMember.role === "support") return;
-    const { error } = await supabase.from("organization_members").update({
-      role: draftRole,
-      permissions: draftPermissions,
-      active: draftActive,
-    }).eq("organization_id", organizationId).eq("user_id", editingMember.user_id);
-    if (error) return void toast.error("Não foi possível atualizar as autorizações.");
-    setMembers((current) => current.map((member) => member.user_id === editingMember.user_id
-      ? { ...member, role: draftRole, permissions: draftPermissions, active: draftActive }
-      : member));
-    setEditingId(null);
-    toast.success("Perfil e autorizações atualizados.");
-  }
-
-  async function removeMember(member: Member) {
-    if (member.user_id === user.id || member.role === "support" || !confirm("Remover este usuário da equipe?")) return;
-    const { error } = await supabase.from("organization_members").delete().eq("organization_id", organizationId).eq("user_id", member.user_id);
-    if (error) return void toast.error("Não foi possível remover o usuário.");
-    setMembers((current) => current.filter((item) => item.user_id !== member.user_id));
-    toast.success("Usuário removido da equipe.");
-  }
-
-  function switchOrganization(id: string) {
-    localStorage.setItem("central-active-organization", id);
-    onOrganizationChange(id);
-  }
-
+  const me=members.find(member=>member.user_id===user.id);
   return <section className="content settings-module">
     <div className="page-heading">
-      <div><span className="eyebrow">ADMINISTRAÇÃO E SEGURANÇA</span><h1>Usuários e acessos</h1><p>Dados isolados por organização e permissões configuráveis por função.</p></div>
-      <Button variant="outline" onClick={() => void loadSettings()} disabled={loading}><RefreshCw size={16}/> Atualizar</Button>
+      <div><span className="eyebrow">ADMINISTRAÇÃO E SEGURANÇA</span><h1>Usuários e acessos</h1><p>Um usuário, uma filial e permissões aplicadas também pelo banco.</p></div>
+      <Button variant="outline" onClick={()=>void load()} disabled={loading}><RefreshCw size={16}/> Atualizar</Button>
     </div>
-
     <div className="settings-grid">
       <div className="panel settings-card">
-        <div className="settings-title"><Building2/><div><h2>Organização</h2><span>Empresa ativa neste dispositivo</span></div></div>
-        <label>Nome da organização<Input value={name} onChange={(event) => setName(event.target.value)} disabled={!canManageSettings}/></label>
-        {canManageSettings && <Button onClick={saveOrganization}><Check size={16}/> Salvar nome</Button>}
-        <div className="organization-list">{memberships.map((item) => <button key={item.organization_id} className={item.organization_id === organizationId ? "active" : ""} onClick={() => switchOrganization(item.organization_id)}><div><strong>{item.organizations?.name || "Organização"}</strong><span>{roleLabels[item.role]}</span></div>{item.organization_id === organizationId && <Badge>Ativa</Badge>}</button>)}</div>
+        <div className="settings-title"><Building2/><div><h2>Unidade vinculada</h2><span>O vínculo não pode ser trocado pelo navegador</span></div></div>
+        <div className="account-line"><span>Organização</span><strong>{name}</strong></div>
+        <div className="account-line"><span>Isolamento</span><Badge>RLS ativo</Badge></div>
       </div>
-
       <div className="panel settings-card">
-        <div className="settings-title"><UserRound/><div><h2>Minha conta</h2><span>Perfil autenticado e isolado</span></div></div>
-        <div className="account-line"><span>E-mail</span><strong>{user.email || "Não informado"}</strong></div>
-        <div className="account-line"><span>Perfil</span><Badge variant="secondary">{currentMember ? roleLabels[currentMember.role] : "Carregando"}</Badge></div>
-        <Button variant="outline" onClick={() => void supabase.auth.signOut()}><LogOut size={16}/> Sair do sistema</Button>
+        <div className="settings-title"><UserRound/><div><h2>Minha conta</h2><span>Perfil autenticado no Supabase</span></div></div>
+        <div className="account-line"><span>E-mail</span><strong>{user.email||"Não informado"}</strong></div>
+        <div className="account-line"><span>Cargo</span><Badge variant="secondary">{me?roleLabels[me.cargo]:access?roleLabels[access.role]:"Sem vínculo"}</Badge></div>
       </div>
-
       <div className="panel settings-card invite-card">
-        <div className="settings-title"><KeyRound/><div><h2>Novo acesso</h2><span>Crie um convite já com a função correta</span></div></div>
-        {canManageUsers ? <>
-          <label>Função inicial<select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as MemberRole)}>{assignableRoles.map((item) => <option key={item} value={item}>{roleLabels[item]}</option>)}</select></label>
-          {inviteCode ? <div className="invite-code"><strong>{inviteCode}</strong><Button variant="outline" onClick={() => void copyText(inviteCode, "Código copiado.")}><Clipboard size={16}/> Copiar</Button></div> : <p className="settings-help">Escolha a função e gere o código que será usado após o cadastro.</p>}
-          <Button onClick={generateInvite}>{inviteCode ? <RefreshCw size={16}/> : <KeyRound size={16}/>} {inviteCode ? "Gerar novo código" : "Criar código"}</Button>
-          <small>O convite expira em 30 dias. As permissões poderão ser personalizadas depois.</small>
-        </> : <p className="settings-help">Somente usuários autorizados podem gerar acessos.</p>}
+        <div className="settings-title"><KeyRound/><div><h2>Novo acesso</h2><span>Convite ligado somente a esta filial</span></div></div>
+        {canManage ? <>
+          <label>Cargo inicial<select value={inviteRole} onChange={event=>setInviteRole(event.target.value as MemberRole)}>{assignableRoles.map(role=><option key={role} value={role}>{roleLabels[role]}</option>)}</select></label>
+          {inviteCode&&<div className="invite-code"><strong>{inviteCode}</strong><Button variant="outline" onClick={async()=>{await navigator.clipboard.writeText(inviteCode);toast.success("Código copiado.");}}><Clipboard size={16}/> Copiar</Button></div>}
+          <Button onClick={()=>void generateInvite()}><KeyRound size={16}/>{inviteCode?"Gerar outro código":"Criar convite"}</Button>
+          <small>O código expira em 30 dias e só pode ser usado uma vez.</small>
+        </>:<p className="settings-help">Somente a gestão autorizada da filial pode criar acessos.</p>}
       </div>
-
-      <div className="panel settings-card">
-        <div className="settings-title"><ShieldCheck/><div><h2>Entrar em outra equipe</h2><span>Use o código enviado pelo administrador</span></div></div>
-        <label>Código de 8 caracteres<Input value={joinCode} maxLength={8} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="EX.: M4NGUE1R"/></label>
-        <Button onClick={joinOrganization}>Validar código</Button>
-      </div>
+      {!access&&<div className="panel settings-card">
+        <div className="settings-title"><ShieldCheck/><div><h2>Vincular minha conta</h2><span>Use o convite recebido do gerente</span></div></div>
+        <label>Código de 8 caracteres<Input value={joinCode} maxLength={8} onChange={event=>setJoinCode(event.target.value.toUpperCase())}/></label>
+        <Button onClick={()=>void acceptInvite()}>Validar código</Button>
+      </div>}
     </div>
-
-    <div className="panel team-panel">
-      <div className="balance-toolbar"><div><h2>Equipe e permissões</h2><span>{members.length} {members.length === 1 ? "usuário" : "usuários"} nesta organização</span></div><Users size={20}/></div>
-      <div className="team-list">{members.map((member) => <div className={`team-row ${!member.active ? "member-disabled" : ""}`} key={member.user_id}>
-        <div className="member-avatar">{member.user_id === user.id ? "EU" : (member.full_name || member.email).slice(0,2).toUpperCase()}</div>
-        <div className="member-identity"><strong>{member.full_name || member.email}</strong><span>{member.email}</span></div>
-        <Badge variant={member.active ? "secondary" : "outline"}>{member.active ? roleLabels[member.role] : "Suspenso"}</Badge>
-        {canManageUsers && member.user_id !== user.id && member.role !== "support" && <Button variant="outline" onClick={() => openAccessEditor(member)}><LockKeyhole size={15}/> Autorizações</Button>}
-        {canManageUsers && member.user_id !== user.id && member.role !== "support" && <button className="row-delete" onClick={() => void removeMember(member)} aria-label="Remover usuário"><Trash2 size={16}/></button>}
+    {(canManage||members.length>0)&&<div className="panel team-panel">
+      <div className="balance-toolbar"><div><h2>Equipe da unidade</h2><span>{members.length} usuário(s) visível(is)</span></div><Users size={20}/></div>
+      <div className="team-list">{members.map(member=><div className={`team-row ${!member.ativo?"member-disabled":""}`} key={member.user_id}>
+        <div className="member-avatar">{member.user_id===user.id?"EU":(member.full_name||member.email||"US").slice(0,2).toUpperCase()}</div>
+        <div className="member-identity"><strong>{member.full_name||member.email||"Usuário"}</strong><span>{member.email}</span></div>
+        <Badge variant={member.ativo?"secondary":"outline"}>{member.ativo?roleLabels[member.cargo]:"Suspenso"}</Badge>
+        {canManage&&member.user_id!==user.id&&<Button variant="outline" onClick={()=>openEditor(member)}><LockKeyhole size={15}/> Autorizações</Button>}
       </div>)}</div>
-    </div>
-
-    {editingMember && <div className="panel access-editor">
-      <div className="access-editor-head"><div><span className="eyebrow">PERFIL INDIVIDUAL</span><h2>{editingMember.full_name || editingMember.email}</h2><p>Selecione uma função pronta e ajuste qualquer permissão individualmente.</p></div><Badge>{draftActive ? "Acesso ativo" : "Acesso suspenso"}</Badge></div>
-      <div className="access-profile-row">
-        <label>Função<select value={draftRole} onChange={(event) => applyRole(event.target.value as MemberRole)}>{assignableRoles.map((item) => <option key={item} value={item}>{roleLabels[item]}</option>)}</select></label>
-        <label className="access-active"><input type="checkbox" checked={draftActive} onChange={(event) => setDraftActive(event.target.checked)}/><span><strong>Usuário ativo</strong><small>Desative para bloquear o acesso sem excluir o histórico.</small></span></label>
-      </div>
-      <div className="permission-groups">{permissionGroups.map((group) => <fieldset key={group.label}><legend>{group.label}</legend>{group.items.map((permission) => <label key={permission.key}><input type="checkbox" checked={draftPermissions.includes(permission.key)} onChange={() => togglePermission(permission.key)}/><span>{permission.label}</span></label>)}</fieldset>)}</div>
-      <div className="access-actions"><Button variant="outline" onClick={() => setEditingId(null)}>Cancelar</Button><Button onClick={() => void saveMemberAccess()}><UserCheck size={16}/> Salvar autorizações</Button></div>
+    </div>}
+    {editing&&<div className="panel access-editor">
+      <div className="access-editor-head"><div><span className="eyebrow">PERFIL DA FILIAL</span><h2>{editing.full_name||editing.email}</h2><p>O backend valida cargo, filial e permissões protegidas.</p></div><Badge>{draftActive?"Ativo":"Suspenso"}</Badge></div>
+      <div className="access-profile-row"><label>Cargo<select value={draftRole} onChange={event=>applyRole(event.target.value as MemberRole)}>{assignableRoles.map(role=><option key={role} value={role}>{roleLabels[role]}</option>)}</select></label>
+        <label className="access-active"><input type="checkbox" checked={draftActive} onChange={event=>setDraftActive(event.target.checked)}/><span><strong>Usuário ativo</strong><small>Desative sem apagar o histórico.</small></span></label></div>
+      <div className="permission-groups">{permissionGroups.map(group=><fieldset key={group.label}><legend>{group.label}</legend>{group.items.map(item=><label key={item.key}><input type="checkbox" checked={draftRights.includes(item.key)} onChange={()=>toggleRight(item.key)}/><span>{item.label}</span></label>)}</fieldset>)}</div>
+      <div className="access-actions"><Button variant="outline" onClick={()=>setEditing(null)}>Cancelar</Button><Button onClick={()=>void saveAccess()}><UserCheck size={16}/> Salvar autorizações</Button></div>
     </div>}
   </section>;
 }

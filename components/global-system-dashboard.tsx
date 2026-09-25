@@ -71,7 +71,7 @@ export function GlobalSystemDashboard({
   orders,
   suppliers,
   cloudStatus,
-  access: _access,
+  access,
   onNavigate,
   onSelectSupplierForOrder,
   onCreateProduct,
@@ -399,7 +399,7 @@ export function GlobalSystemDashboard({
             <h2 className="text-sm font-bold text-[#211718]">Fluxo Operacional de Pedidos (Kanban)</h2>
             <span className="text-xs text-[#7d6e70]">{orders.length} pedidos rastreados</span>
           </div>
-          <KanbanModule orders={orders} onRefresh={handleRefreshOrders} />
+          <KanbanModule orders={orders} access={access} onRefresh={handleRefreshOrders} />
         </section>
       )}
 

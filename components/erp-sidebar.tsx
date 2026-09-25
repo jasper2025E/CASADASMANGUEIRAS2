@@ -708,7 +708,7 @@ export function ErpSidebar({
                       cloudStatus === "Dados sincronizados" ? "bg-emerald-500" : "bg-amber-500"
                     }`}
                   />
-                  {access?.role === "support" ? "Acesso Total" : "Conectado"}
+                  {access?.role === "SUPER_ADMIN" || access?.role === "ADMIN_CD" ? "Acesso Global" : "Conectado"}
                 </div>
               </div>
             </div>
