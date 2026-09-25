@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import Image from "next/image";
 import {
   Barcode,
   Search,
@@ -16,10 +15,6 @@ import {
   Truck,
   CreditCard,
   Building2,
-  Calendar,
-  UserCheck,
-  RefreshCw,
-  SlidersHorizontal,
   ChevronDown,
 } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -61,8 +56,8 @@ export function ErpOrderModal({
   
   // General Data
   const [orderNumber, setOrderNumber] = useState("");
-  const [movementType, setMovementType] = useState("Saída / Reposição Filial");
-  const [emissionType, setEmissionType] = useState("Própria");
+  const [movementType] = useState("Saída / Reposição Filial");
+  const [emissionType] = useState("Própria");
   const [commercialOperation, setCommercialOperation] = useState("Transferência entre Unidades");
   const [salesperson, setSalesperson] = useState(currentUserEmail.split("@")[0] || "Operador");
   const [generalNotes, setGeneralNotes] = useState("");

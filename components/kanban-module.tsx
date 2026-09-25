@@ -2,7 +2,7 @@
 
 import React from "react";
 import { type Order, type FulfillmentStage } from "@/app/page";
-import { normalizeFulfillmentStage, FULFILLMENT_STAGES } from "@/components/order-progress";
+import { normalizeFulfillmentStage } from "@/components/order-progress";
 import { Button } from "@/components/ui/button";
 import { ClipboardCheck, PackageCheck, Truck, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";

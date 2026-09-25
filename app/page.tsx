@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
-import { Barcode, Boxes, ChevronDown, ClipboardCheck, FileSpreadsheet, LayoutDashboard, Menu, PackagePlus, Plus, RotateCcw, Search, Settings, ShoppingCart, Upload, X, Zap, LayoutGrid, Table, LogOut, SlidersHorizontal, Sparkles, Building2 } from "lucide-react";
-import { jsPDF } from "jspdf";
+import { Barcode, Boxes, ChevronDown, ClipboardCheck, FileSpreadsheet, LayoutDashboard, Menu, PackagePlus, Plus, RotateCcw, Search, Settings, ShoppingCart, Upload, Zap, LayoutGrid, Table, LogOut } from "lucide-react";
 import productsSeed from "@/lib/initial-products.json";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,18 +53,39 @@ const fromCloudProduct = (product: Record<string, unknown>): Product => ({ id:St
 
 function openCatalogDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
+    if (typeof window === "undefined" || !window.indexedDB) return reject(new Error("No IndexedDB"));
+    const timer = setTimeout(() => reject(new Error("IndexedDB timeout")), 800);
     const request = indexedDB.open("central-pedido", 1);
     request.onupgradeneeded = () => request.result.createObjectStore("catalog");
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => { clearTimeout(timer); resolve(request.result); };
+    request.onerror = () => { clearTimeout(timer); reject(request.error); };
   });
 }
 async function loadCatalog(): Promise<Product[] | null> {
-  try { const db = await openCatalogDb(); return await new Promise((resolve, reject) => { const req = db.transaction("catalog").objectStore("catalog").get("products"); req.onsuccess = () => resolve(req.result || null); req.onerror = () => reject(req.error); }); } catch { return null; }
+  try {
+    const db = await openCatalogDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("catalog", "readonly");
+      const req = tx.objectStore("catalog").get("products");
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
 }
 async function persistCatalog(products: Product[]) {
-  const db = await openCatalogDb();
-  await new Promise<void>((resolve, reject) => { const tx = db.transaction("catalog", "readwrite"); tx.objectStore("catalog").put(products, "products"); tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+  try {
+    const db = await openCatalogDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("catalog", "readwrite");
+      tx.objectStore("catalog").put(products, "products");
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // Ignore IndexedDB write failure on restricted browsers
+  }
 }
 
 export default function Home() {
@@ -93,7 +112,6 @@ export default function Home() {
   const [authLoading, setAuthLoading] = useState(true);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [organizationName, setOrganizationName] = useState("Organização");
-  const [organizationType, setOrganizationType] = useState<"branch" | "distribution_center">("branch");
   const [destinationOrganizationId, setDestinationOrganizationId] = useState<string | null>(null);
   const [access, setAccess] = useState<UserAccess | null>(null);
   const [cloudStatus, setCloudStatus] = useState("Conectando ao banco...");
@@ -101,7 +119,6 @@ export default function Home() {
   const [savingOrder, setSavingOrder] = useState(false);
   const [erpModalOpen, setErpModalOpen] = useState(false);
   const [erpModalInitialOrder, setErpModalInitialOrder] = useState<Order | null>(null);
-  const [sidebarFilter, setSidebarFilter] = useState("");
 
   // Shortcut F3 listener to quickly open the ERP Order Modal
   useEffect(() => {
@@ -215,6 +232,8 @@ export default function Home() {
       ],
       active: true,
     });
+    setOrganizationId("cdm-matriz");
+    setDestinationOrganizationId("cdm-cd");
     setOrganizationName("Casa das Mangueiras - Matriz");
     setCloudStatus("Modo Operador Ativo");
     setAuthLoading(false);
@@ -310,16 +329,19 @@ export default function Home() {
       };
       setAccess(resolvedAccess);
       const { data: organization } = await supabase.from("organizations").select("name,organization_type,parent_organization_id").eq("id", orgId).single();
-      const currentType = organization?.organization_type === "distribution_center" ? "distribution_center" : "branch";
       setOrganizationName(organization?.name || "Organização");
-      setOrganizationType(currentType);
       setDestinationOrganizationId(organization?.parent_organization_id || orgId);
       const cloudProducts: Product[] = []; let from = 0;
-      while (true) {
+      let pageCount = 0;
+      while (pageCount < 10) {
+        pageCount++;
         const { data, error } = await supabase.from("products").select("id,code,description,brand,supplier,category,unit,stock,cost,price,ncm,barcode,image_url").eq("organization_id", orgId).range(from, from + 999);
         if (error) { setCloudStatus("Falha ao carregar produtos"); return; }
-        cloudProducts.push(...(data || []).map((product) => fromCloudProduct(product)));
-        if (!data || data.length < 1000) break; from += 1000;
+        if (data?.length) {
+          cloudProducts.push(...data.map((product) => fromCloudProduct(product)));
+        }
+        if (!data || data.length < 1000) break;
+        from += 1000;
       }
       if (!cloudProducts.length) {
         setCloudStatus("Enviando catálogo inicial...");
@@ -385,14 +407,10 @@ export default function Home() {
 
   const suppliers = useMemo(() => Array.from(new Set(products.map((p) => p.supplier))), [products]);
   const categories = useMemo(() => ["Todas", ...Array.from(new Set(products.filter((p) => supplier === "Todos" || p.supplier === supplier).map((p) => p.category)))], [products, supplier]);
-  const filtered = useMemo(() => {
-    const normalized = search.toLocaleLowerCase("pt-BR").trim();
-    return products.filter((p) => (supplier === "Todos" || p.supplier === supplier) && (category === "Todas" || p.category === category) && (!normalized || `${p.code} ${p.description} ${p.supplier}`.toLocaleLowerCase("pt-BR").includes(normalized)) && (!onlySelected || (quantities[p.id] || 0) > 0));
-  }, [products, supplier, category, search, onlySelected, quantities]);
+  const filtered = useMemo(() => [] as Product[], []);
   const selectedItems = useMemo(() => products.filter((p) => (quantities[p.id] || 0) > 0).map((p) => ({ ...p, quantity: quantities[p.id] })), [products, quantities]);
   const totalUnits = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
   const visibleNavItems = useMemo(() => navItems.filter((item) => !item.permission || can(access, item.permission)), [access]);
-  const _effectiveView = visibleNavItems.some((item) => item.id === view) ? view : (visibleNavItems[0]?.id || "settings");
 
   function setQuantity(id: string, value: number) { setQuantities((current) => ({ ...current, [id]: Math.max(0, Number.isFinite(value) ? value : 0) })); }
   async function saveOrder(status: Order["status"]) {
@@ -441,9 +459,10 @@ export default function Home() {
     const sheet = XLSX.utils.json_to_sheet(rows); sheet["!cols"] = [{ wch: 18 }, { wch: 16 }, { wch: 58 }, { wch: 25 }, { wch: 12 }, { wch: 14 }, { wch: 10 }];
     const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, "Pedido"); XLSX.writeFile(book, `pedido-${new Date().toISOString().slice(0, 10)}.xlsx`); toast.success("Planilha XLSX baixada.");
   }
-  function exportPdf() {
+  async function exportPdf() {
     if (!can(access, "orders.export")) return void toast.error("Seu perfil não pode exportar pedidos.");
     if (!selectedItems.length) return void toast.error("Não há itens para exportar.");
+    const { jsPDF } = await import("jspdf");
     const doc = new jsPDF({ orientation: "landscape" }); doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.text("CDM — Pedido de compra", 14, 16); doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(`Casa das Mangueiras · Emitido em ${new Date().toLocaleString("pt-BR")}`, 14, 22);
     let y = 31; doc.setFillColor(20, 46, 74); doc.rect(14, y - 5, 269, 8, "F"); doc.setTextColor(255, 255, 255); doc.text("FORNECEDOR", 16, y); doc.text("CÓDIGO", 52, y); doc.text("PRODUTO", 82, y); doc.text("ESTOQUE", 232, y); doc.text("PEDIDO", 258, y); y += 8; doc.setTextColor(30, 41, 59);
     selectedItems.forEach((i, index) => { if (y > 190) { doc.addPage(); y = 16; } if (index % 2 === 0) { doc.setFillColor(244, 247, 250); doc.rect(14, y - 5, 269, 8, "F"); } doc.text(i.supplier.slice(0, 18), 16, y); doc.text((i.code || "—").slice(0, 15), 52, y); doc.text(i.description.slice(0, 72), 82, y); doc.text(`${i.stock} ${i.unit}`, 232, y); doc.setFont("helvetica", "bold"); doc.text(`${i.quantity} ${i.unit}`, 258, y); doc.setFont("helvetica", "normal"); y += 8; });

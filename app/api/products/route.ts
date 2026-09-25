@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import fullCatalog from "@/lib/products.json";
+import initialProducts from "@/lib/initial-products.json";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(Number(searchParams.get("limit")) || 50, 200);
   const offset = Number(searchParams.get("offset")) || 0;
 
-  let results = fullCatalog as typeof fullCatalog;
+  let results = initialProducts as typeof initialProducts;
 
   if (supplier && supplier !== "Todos") {
     results = results.filter((p) => p.supplier === supplier);
@@ -38,3 +38,4 @@ export async function GET(req: NextRequest) {
     items: paginated,
   });
 }
+

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
+import dynamic from "next/dynamic";
 import {
   DollarSign,
   TrendingUp,
@@ -28,8 +29,19 @@ import {
 } from "@/components/order-progress";
 
 import { KanbanModule } from "@/components/kanban-module";
-import { CategorySalesChart } from "@/components/category-sales-chart";
 import { type UserAccess } from "@/lib/access";
+
+const CategorySalesChart = dynamic(
+  () => import("@/components/category-sales-chart").then((m) => m.CategorySalesChart),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-64 flex items-center justify-center text-xs font-semibold text-[#7a6c6e] bg-[#faf7f7] rounded-xl border border-[#ede5e6]">
+        Carregando análise gráfica de categorias...
+      </div>
+    ),
+  }
+);
 
 interface GlobalSystemDashboardProps {
   products: Product[];
@@ -119,20 +131,24 @@ export function GlobalSystemDashboard({
         ? ((stockRetailTotal - stockCostTotal) / stockRetailTotal) * 100
         : 0;
 
-    // Supplier stats
+    // Supplier stats (optimized single-pass)
+    const supplierMap: Record<string, { count: number; units: number; costValue: number }> = {};
+    for (const p of products) {
+      const sup = p.supplier || "Outros";
+      if (!supplierMap[sup]) supplierMap[sup] = { count: 0, units: 0, costValue: 0 };
+      const s = Number(p.stock) || 0;
+      supplierMap[sup].count++;
+      supplierMap[sup].units += s;
+      if (p.cost) supplierMap[sup].costValue += s * p.cost;
+    }
     const supplierStats = suppliers.map((name) => {
-      const suppProducts = products.filter((p) => p.supplier === name);
-      const units = suppProducts.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
-      const costValue = suppProducts.reduce(
-        (sum, p) => sum + (p.cost ? (Number(p.stock) || 0) * p.cost : 0),
-        0
-      );
+      const data = supplierMap[name] || { count: 0, units: 0, costValue: 0 };
       return {
         name,
-        count: suppProducts.length,
-        units,
-        costValue,
-        percentage: products.length > 0 ? (suppProducts.length / products.length) * 100 : 0,
+        count: data.count,
+        units: data.units,
+        costValue: data.costValue,
+        percentage: products.length > 0 ? (data.count / products.length) * 100 : 0,
       };
     });
 

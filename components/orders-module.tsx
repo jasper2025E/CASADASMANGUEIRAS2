@@ -1,8 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useSyncExternalStore, type ReactNode } from "react";
-import { AutoSizer as BaseAutoSizer } from "react-virtualized-auto-sizer";
-import Image from "next/image";
+import React, { useState, useMemo } from "react";
 import {
   ShoppingCart,
   Clock,
@@ -42,40 +40,6 @@ import {
 } from "@/components/order-progress";
 
 export type OrderSubTab = "compose" | "history" | "analytics";
-
-export interface AutoSizerProps {
-  children: (params: { height: number; width: number }) => ReactNode;
-  className?: string;
-  style?: React.CSSProperties;
-  defaultHeight?: number;
-  defaultWidth?: number;
-}
-
-export function AutoSizer({ children, className, style, defaultHeight = 600, defaultWidth = 800 }: AutoSizerProps) {
-  const mounted = useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false
-  );
-
-  if (!mounted) {
-    return (
-      <div className={className} style={{ width: "100%", height: defaultHeight, ...style }}>
-        {children({ height: defaultHeight, width: defaultWidth })}
-      </div>
-    );
-  }
-
-  return (
-    <BaseAutoSizer
-      className={className}
-      style={style}
-      renderProp={({ height, width }) => {
-        return children({ height: height ?? defaultHeight, width: width ?? defaultWidth });
-      }}
-    />
-  );
-}
 
 interface OrdersModuleProps {
   canCreate: boolean;
@@ -182,70 +146,102 @@ export function OrdersModule({
       .trim();
   }, []);
 
-  // Filter products by product name (description), SKU, brand, barcode, and optional supplier/category
-  const displayProducts = useMemo(() => {
-    const query = normalizeText(activeProductSearch);
-    const tokens = query.split(/\s+/).filter(Boolean);
+  // Reset pagination when search or filters change (React-recommended state adjustment during render)
+  const [prevFilterKey, setPrevFilterKey] = useState("");
+  const currentFilterKey = `${activeProductSearch}|${supplier}|${category}|${onlySelected}|${searchAllSuppliers}`;
+  const [visibleCount, setVisibleCount] = useState(50);
 
-    return products.filter((p) => {
-      // "Somente adicionados" filter
-      if (onlySelected && (quantities[p.id] || 0) <= 0) {
-        return false;
+  if (prevFilterKey !== currentFilterKey) {
+    setPrevFilterKey(currentFilterKey);
+    setVisibleCount(50);
+  }
+
+  // 1. Combined single-pass calculation for high performance (zero UI freezing, NEVER re-runs on +/- quantity)
+  const { filteredProducts, searchStats } = useMemo(() => {
+    const rawQuery = activeProductSearch.trim();
+    const query = normalizeText(rawQuery);
+    const tokens = query.split(/\s+/).filter(Boolean);
+    const hasSearch = tokens.length > 0;
+
+    const filteredList: Product[] = [];
+    const supplierCounts: Record<string, number> = {};
+    let totalMatches = 0;
+
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+
+      // Check tokens if search query exists
+      let matchesTokens = true;
+      if (hasSearch) {
+        const desc = (p.description || "").toLowerCase();
+        const code = (p.code || "").toLowerCase();
+        const brand = (p.brand || "").toLowerCase();
+        const sup = (p.supplier || "").toLowerCase();
+        const bar = (p.barcode || "").toLowerCase();
+        const cat = (p.category || "").toLowerCase();
+
+        for (let t = 0; t < tokens.length; t++) {
+          const tok = tokens[t];
+          if (
+            !desc.includes(tok) &&
+            !code.includes(tok) &&
+            !brand.includes(tok) &&
+            !sup.includes(tok) &&
+            !bar.includes(tok) &&
+            !cat.includes(tok)
+          ) {
+            const normText = `${normalizeText(desc)} ${normalizeText(code)} ${normalizeText(brand)} ${normalizeText(sup)} ${normalizeText(bar)}`;
+            if (!normText.includes(tok)) {
+              matchesTokens = false;
+              break;
+            }
+          }
+        }
       }
 
+      if (hasSearch && matchesTokens) {
+        totalMatches++;
+        supplierCounts[p.supplier] = (supplierCounts[p.supplier] || 0) + 1;
+      }
+
+      if (!matchesTokens) continue;
+
       // Supplier filter:
-      // If a search query is typed and searchAllSuppliers is TRUE, search across all suppliers without restriction!
-      // Otherwise, if no query or searchAllSuppliers is FALSE, respect selected supplier.
       if (supplier !== "Todos") {
-        if (!query || !searchAllSuppliers) {
-          if (p.supplier !== supplier) return false;
+        if (!hasSearch || !searchAllSuppliers) {
+          if (p.supplier !== supplier) continue;
         }
       }
 
       // Category filter:
       if (category !== "Todas" && p.category !== category) {
-        return false;
+        continue;
       }
 
-      // Match all query tokens against product name / description, SKU code, brand, barcode, supplier, category
-      if (tokens.length > 0) {
-        const searchable = `${normalizeText(p.description)} ${normalizeText(p.code || "")} ${normalizeText(p.brand || "")} ${normalizeText(p.barcode || "")} ${normalizeText(p.supplier || "")} ${normalizeText(p.category || "")}`;
-        if (!tokens.every((t) => searchable.includes(t))) {
-          return false;
+      filteredList.push(p);
+    }
+
+    const stats = hasSearch
+      ? {
+          totalMatches,
+          inCurrentSupplier: supplier !== "Todos" ? (supplierCounts[supplier] || 0) : totalMatches,
+          inOtherSuppliers: totalMatches - (supplier !== "Todos" ? (supplierCounts[supplier] || 0) : totalMatches),
+          supplierCounts,
         }
-      }
+      : null;
 
-      return true;
-    });
-  }, [products, activeProductSearch, searchAllSuppliers, supplier, category, onlySelected, quantities, normalizeText]);
+    return { filteredProducts: filteredList, searchStats: stats };
+  }, [products, activeProductSearch, searchAllSuppliers, supplier, category, normalizeText]);
 
-  // Aggregate matching suppliers when search query is typed
-  const searchStats = useMemo(() => {
-    const query = normalizeText(activeProductSearch);
-    const tokens = query.split(/\s+/).filter(Boolean);
-    if (tokens.length === 0) return null;
+  // 2. Only if "Somente adicionados" filter is toggled, filter by quantities
+  const displayProducts = useMemo(() => {
+    if (!onlySelected) return filteredProducts;
+    return filteredProducts.filter((p) => (quantities[p.id] || 0) > 0);
+  }, [filteredProducts, onlySelected, quantities]);
 
-    const supplierCounts: Record<string, number> = {};
-    let totalMatches = 0;
-
-    products.forEach((p) => {
-      const searchable = `${normalizeText(p.description)} ${normalizeText(p.code || "")} ${normalizeText(p.brand || "")} ${normalizeText(p.barcode || "")} ${normalizeText(p.supplier || "")} ${normalizeText(p.category || "")}`;
-      if (tokens.every((t) => searchable.includes(t))) {
-        totalMatches++;
-        supplierCounts[p.supplier] = (supplierCounts[p.supplier] || 0) + 1;
-      }
-    });
-
-    const inCurrentSupplier = supplier !== "Todos" ? (supplierCounts[supplier] || 0) : totalMatches;
-    const inOtherSuppliers = totalMatches - inCurrentSupplier;
-
-    return {
-      totalMatches,
-      inCurrentSupplier,
-      inOtherSuppliers,
-      supplierCounts,
-    };
-  }, [products, activeProductSearch, supplier, normalizeText]);
+  const visibleProducts = useMemo(() => {
+    return displayProducts.slice(0, visibleCount);
+  }, [displayProducts, visibleCount]);
 
   const handleSetOrderTab = React.useCallback((tab: OrderSubTab) => setOrderTab(tab), [setOrderTab]);
   const handleSetSupplier = React.useCallback((sup: string) => setSupplier(sup), [setSupplier]);
@@ -631,106 +627,115 @@ export function OrdersModule({
                     </div>
                   </div>
                 ) : (
-                  <AutoSizer>
-                    {({ height, width }: { height: number; width: number }) => (
-                      <div style={{ height, width, overflowY: "auto" }}>
-                        {displayProducts.map((product) => {
-                          const quantity = quantities[product.id] || 0;
-                          return (
-                            <article
-                              className={`product-row ${quantity > 0 ? "has-quantity" : ""}`}
-                              key={product.id}
+                  <div className="product-list-scroll overflow-y-auto" style={{ height: "600px", width: "100%" }}>
+                    {visibleProducts.map((product) => {
+                      const quantity = quantities[product.id] || 0;
+                      return (
+                        <article
+                          className={`product-row ${quantity > 0 ? "has-quantity" : ""}`}
+                          key={product.id}
+                        >
+                          <div className="product-main">
+                            <button
+                              className="product-image"
+                              onClick={() => {
+                                handleSetProductModal(product);
+                                handleSetProductModalTab("dados");
+                              }}
+                              aria-label={`Editar ${product.description}`}
                             >
-                              <div className="product-main">
-                                <button
-                                  className="product-image"
-                                  onClick={() => {
-                                    handleSetProductModal(product);
-                                    handleSetProductModalTab("dados");
-                                  }}
-                                  aria-label={`Editar ${product.description}`}
-                                >
-                                  {product.image ? (
-                                    <Image
-                                      src={product.image}
-                                      alt={product.description}
-                                      width={48}
-                                      height={48}
-                                      className="w-full h-full object-cover rounded"
-                                    />
-                                  ) : (
-                                    <PackagePlus size={25} />
-                                  )}
-                                </button>
-                                <div>
-                                  <div className="product-meta flex items-center justify-between gap-2">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="font-mono text-xs">{product.code || product.category}</span>
-                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#ede6e7] text-[#4a3b3d] border border-[#ded5d6]">
-                                        <Boxes size={10} className="text-[#790a0e]" />
-                                        {product.supplier}
-                                      </span>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleSetProductModal(product);
-                                        handleSetProductModalTab("codigo");
-                                      }}
-                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#f6e8ea] text-[#790a0e] hover:bg-[#eed5d8] border border-[#eed5d8] transition cursor-pointer"
-                                      title="Código de barras EAN-13"
-                                    >
-                                      <Barcode size={12} />
-                                      <span>EAN‑13</span>
-                                    </button>
-                                  </div>
-                                  <strong className="text-sm font-bold text-[#1e293b] leading-tight block mt-0.5">
-                                    {product.description}
-                                  </strong>
-                                  <span className="text-xs text-[#64748b]">
-                                    {product.category} · unidade: {product.unit} {product.brand ? `· marca: ${product.brand}` : ""}
+                              {product.image ? (
+                                <img
+                                  src={product.image}
+                                  alt={product.description}
+                                  className="w-full h-full object-cover rounded"
+                                  loading="lazy"
+                                />
+                              ) : (
+                                <PackagePlus size={24} />
+                              )}
+                            </button>
+                            <div>
+                              <div className="product-meta flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-mono text-xs">{product.code || product.category}</span>
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#ede6e7] text-[#4a3b3d] border border-[#ded5d6]">
+                                    <Boxes size={10} className="text-[#790a0e]" />
+                                    {product.supplier}
                                   </span>
                                 </div>
-                              </div>
-
-                              <div className="stock">
-                                <strong>{product.stock}</strong>
-                                <span>{product.unit}</span>
-                              </div>
-
-                              <div className="quantity-control">
                                 <button
-                                  onClick={() => handleSetQuantity(product.id, quantity - 1)}
-                                  disabled={quantity === 0}
-                                  aria-label="Diminuir"
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSetProductModal(product);
+                                    handleSetProductModalTab("codigo");
+                                  }}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#f6e8ea] text-[#790a0e] hover:bg-[#eed5d8] border border-[#eed5d8] transition cursor-pointer"
+                                  title="Código de barras EAN-13"
                                 >
-                                  <Minus size={16} />
+                                  <Barcode size={12} />
+                                  <span>EAN‑13</span>
                                 </button>
-                                <input
-                                  aria-label={`Quantidade de ${product.description}`}
-                                  type="number"
-                                  min="0"
-                                  value={quantity || ""}
-                                  placeholder="0"
-                                  onChange={(e) =>
-                                    handleSetQuantity(product.id, Number(e.target.value))
-                                  }
-                                />
-                                <button
-                                  onClick={() => handleSetQuantity(product.id, quantity + 1)}
-                                  aria-label="Aumentar"
-                                >
-                                  <Plus size={16} />
-                                </button>
-                                <span>{product.unit}</span>
                               </div>
-                            </article>
-                          );
-                        })}
+                              <strong className="text-sm font-bold text-[#1e293b] leading-tight block mt-0.5">
+                                {product.description}
+                              </strong>
+                              <span className="text-xs text-[#64748b]">
+                                {product.category} · unidade: {product.unit} {product.brand ? `· marca: ${product.brand}` : ""}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="stock">
+                            <strong>{product.stock}</strong>
+                            <span>{product.unit}</span>
+                          </div>
+
+                          <div className="quantity-control">
+                            <button
+                              onClick={() => handleSetQuantity(product.id, quantity - 1)}
+                              disabled={quantity === 0}
+                              aria-label="Diminuir"
+                            >
+                              <Minus size={16} />
+                            </button>
+                            <input
+                              aria-label={`Quantidade de ${product.description}`}
+                              type="number"
+                              min="0"
+                              value={quantity || ""}
+                              placeholder="0"
+                              onChange={(e) =>
+                                handleSetQuantity(product.id, Number(e.target.value))
+                              }
+                            />
+                            <button
+                              onClick={() => handleSetQuantity(product.id, quantity + 1)}
+                              aria-label="Aumentar"
+                            >
+                              <Plus size={16} />
+                            </button>
+                            <span>{product.unit}</span>
+                          </div>
+                        </article>
+                      );
+                    })}
+
+                    {displayProducts.length > visibleProducts.length && (
+                      <div className="p-4 flex items-center justify-center bg-[#faf7f7] border-t border-[#ede5e6] mt-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setVisibleCount((prev) => prev + 50)}
+                          className="text-xs font-bold text-[#790a0e] border-[#ded3d5] hover:bg-[#f6e8ea]"
+                        >
+                          Carregar mais 50 produtos (exibindo {visibleProducts.length} de {displayProducts.length})
+                        </Button>
                       </div>
                     )}
-                  </AutoSizer>
+                  </div>
                 )}
               </div>
             </div>
